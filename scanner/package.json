@@ -1,0 +1,33 @@
+{
+  "name": "vaultsentry-scanner",
+  "version": "1.0.0",
+  "description": "VaultSentry — Node.js secret scanning engine",
+  "main": "directoryScanner.js",
+  "bin": {
+    "vaultsentry": "./main.js"
+  },
+  "scripts": {
+    "start": "node main.js",
+    "scan": "node main.js",
+    "test": "node test/scanner.test.js"
+  },
+  "keywords": [
+    "secret-scanning",
+    "security",
+    "devsecops",
+    "vaultsentry"
+  ],
+  "author": "VaultSentry Team",
+  "license": "MIT",
+  "optionalDependencies": {
+    "ignore": "^5.3.1"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.101.1",
+    "cors": "^2.8.6",
+    "express": "^5.2.1"
+  }
+}

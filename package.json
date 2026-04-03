@@ -1,0 +1,32 @@
+{
+  "name": "secret-sentry",
+  "version": "1.0.0",
+  "description": "Cloud-Native Secret Detection & Security Platform",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently -n \"backend,frontend\" -c \"yellow,cyan\" \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "dev:backend": "node scanner/server.js",
+    "dev:backend:python": "cd backend && python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000",
+    "dev:frontend": "cd frontend && npm run dev",
+    "build": "cd frontend && npm run build",
+    "start": "concurrently -n \"backend,frontend\" -c \"yellow,cyan\" \"npm run start:backend\" \"npm run start:frontend\"",
+    "start:backend": "cd backend && python -m uvicorn app.main:app --host 0.0.0.0 --port 8000",
+    "start:frontend": "cd frontend && npm run start",
+    "install:all": "npm install && cd frontend && npm install && cd ../backend && pip install -r requirements.txt",
+    "test": "node scanner/test/scanner.test.js",
+    "scan": "node scanner/main.js",
+    "scan:report": "node scanner/main.js --report",
+    "scan:repo": "node scanner/main.js --repo",
+    "scan:repo:report": "node scanner/main.js --repo",
+    "docker:up": "docker-compose up -d",
+    "docker:down": "docker-compose down",
+    "docker:build": "docker-compose build",
+    "docker:logs": "docker-compose logs -f"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
