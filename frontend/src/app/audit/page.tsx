@@ -4,6 +4,7 @@ import Header from '@/components/layout/Header'
 import Sidebar from '@/components/layout/Sidebar'
 import { Badge, Button, Card, Skeleton } from '@/components/ui'
 import { isDemoMode } from '@/lib/demoData'
+import { auditLogService, type AuditLogEntry } from '@/services/supabase'
 import {
     ChevronLeft,
     ChevronRight,
@@ -188,14 +189,44 @@ export default function AuditLogsPage() {
   const perPage = 10
 
   useEffect(() => {
-    // Load demo data or fetch from API
+    loadAuditLogs()
+  }, [])
+
+  const loadAuditLogs = async () => {
+    // Only show demo data in demo mode
     if (isDemoMode()) {
       setLogs(DEMO_AUDIT_LOGS)
-    } else {
-      setLogs(DEMO_AUDIT_LOGS) // Fallback to demo data
+      setLoading(false)
+      return
     }
-    setLoading(false)
-  }, [])
+
+    // Fetch real data from Supabase
+    try {
+      const dbLogs = await auditLogService.getAll()
+      // Map DB entries to our AuditLog interface
+      const mappedLogs: AuditLog[] = dbLogs.map((log: AuditLogEntry) => ({
+        id: log.id,
+        action: log.action,
+        category: (log.category || 'settings') as AuditLog['category'],
+        description: log.description,
+        user_email: log.user_email || '',
+        user_name: log.user_name || '',
+        ip_address: log.ip_address || '',
+        user_agent: log.user_agent || '',
+        resource_type: log.resource_type,
+        resource_id: log.resource_id,
+        metadata: log.metadata,
+        created_at: log.created_at,
+      }))
+      setLogs(mappedLogs)
+    } catch (err) {
+      console.error('[AUDIT] Failed to load audit logs:', err)
+      // Show empty state for real accounts
+      setLogs([])
+    } finally {
+      setLoading(false)
+    }
+  }
 
   const filteredLogs = logs.filter(log => {
     const matchesFilter = filter === 'all' || log.category === filter
@@ -262,7 +293,7 @@ export default function AuditLogsPage() {
                 <p className="text-[var(--text-muted)] mt-1">Track all activity and changes in your workspace</p>
               </div>
               <div className="flex items-center gap-3">
-                <Button variant="ghost" leftIcon={<RefreshCw className="w-4 h-4" />} onClick={() => setLoading(true)}>
+                <Button variant="ghost" leftIcon={<RefreshCw className="w-4 h-4" />} onClick={loadAuditLogs}>
                   Refresh
                 </Button>
                 <Button variant="primary" leftIcon={<Download className="w-4 h-4" />} onClick={exportLogs}>
@@ -307,6 +338,14 @@ export default function AuditLogsPage() {
               {loading ? (
                 <div className="p-6">
                   <Skeleton.Table rows={8} columns={5} />
+                </div>
+              ) : logs.length === 0 ? (
+                <div className="text-center py-16">
+                  <FileText className="w-12 h-12 text-[var(--text-muted)] mx-auto mb-4" />
+                  <h3 className="text-lg font-medium text-[var(--text-secondary)]">No audit logs yet</h3>
+                  <p className="text-[var(--text-muted)] mt-2 max-w-md mx-auto">
+                    Audit logs will appear here as you and your team perform actions like scanning repositories, managing secrets, and updating settings.
+                  </p>
                 </div>
               ) : (
                 <>
@@ -361,34 +400,36 @@ export default function AuditLogsPage() {
                   </div>
 
                   {/* Pagination */}
-                  <div className="flex items-center justify-between px-4 py-3 border-t border-[var(--border-color)]">
-                    <p className="text-sm text-[var(--text-muted)]">
-                      Showing {(page - 1) * perPage + 1} to {Math.min(page * perPage, filteredLogs.length)} of {filteredLogs.length} logs
-                    </p>
-                    <div className="flex items-center gap-2">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        leftIcon={<ChevronLeft className="w-4 h-4" />}
-                        onClick={() => setPage(p => Math.max(1, p - 1))}
-                        disabled={page === 1}
-                      >
-                        Previous
-                      </Button>
-                      <span className="text-sm text-[var(--text-secondary)]">
-                        Page {page} of {totalPages}
-                      </span>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        rightIcon={<ChevronRight className="w-4 h-4" />}
-                        onClick={() => setPage(p => Math.min(totalPages, p + 1))}
-                        disabled={page === totalPages}
-                      >
-                        Next
-                      </Button>
+                  {totalPages > 0 && (
+                    <div className="flex items-center justify-between px-4 py-3 border-t border-[var(--border-color)]">
+                      <p className="text-sm text-[var(--text-muted)]">
+                        Showing {(page - 1) * perPage + 1} to {Math.min(page * perPage, filteredLogs.length)} of {filteredLogs.length} logs
+                      </p>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          leftIcon={<ChevronLeft className="w-4 h-4" />}
+                          onClick={() => setPage(p => Math.max(1, p - 1))}
+                          disabled={page === 1}
+                        >
+                          Previous
+                        </Button>
+                        <span className="text-sm text-[var(--text-secondary)]">
+                          Page {page} of {totalPages}
+                        </span>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          rightIcon={<ChevronRight className="w-4 h-4" />}
+                          onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                          disabled={page === totalPages}
+                        >
+                          Next
+                        </Button>
+                      </div>
                     </div>
-                  </div>
+                  )}
                 </>
               )}
             </Card>

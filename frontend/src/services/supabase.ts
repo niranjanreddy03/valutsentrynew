@@ -858,13 +858,27 @@ export const dashboardService = {
 export const apiKeyService = {
   async getAll(): Promise<ApiKey[]> {
     const supabase = getSupabaseClient()
-    const { data, error } = await supabase
-      .from('api_keys')
-      .select('*')
-      .order('created_at', { ascending: false })
+    try {
+      const queryPromise = supabase
+        .from('api_keys')
+        .select('*')
+        .order('created_at', { ascending: false })
 
-    if (error) throw error
-    return data || []
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('API keys query timed out')), 5000)
+      )
+
+      const { data, error } = await Promise.race([queryPromise, timeoutPromise])
+
+      if (error) {
+        console.warn('[API KEYS] Failed to fetch api keys:', error.message)
+        return []
+      }
+      return data || []
+    } catch (err) {
+      console.warn('[API KEYS] API keys not available:', err)
+      return []
+    }
   },
 
   async create(name: string, permissions: string[] = ['read']): Promise<{ key: string; apiKey: ApiKey }> {
@@ -922,6 +936,69 @@ export const apiKeyService = {
       .eq('id', id)
 
     if (error) throw error
+  },
+}
+
+// =====================================================
+// AUDIT LOG SERVICE
+// =====================================================
+
+export interface AuditLogEntry {
+  id: number
+  action: string
+  category: string
+  description: string
+  user_email: string
+  user_name: string
+  ip_address: string
+  user_agent: string
+  resource_type?: string
+  resource_id?: string
+  metadata?: Record<string, any>
+  created_at: string
+}
+
+export const auditLogService = {
+  async getAll(): Promise<AuditLogEntry[]> {
+    const supabase = getSupabaseClient()
+    try {
+      const queryPromise = supabase
+        .from('audit_logs')
+        .select('*')
+        .order('created_at', { ascending: false })
+
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Audit logs query timed out')), 5000)
+      )
+
+      const { data, error } = await Promise.race([queryPromise, timeoutPromise])
+
+      if (error) {
+        // Table might not exist yet - return empty
+        console.warn('[AUDIT] Failed to fetch audit logs:', error.message)
+        return []
+      }
+      return data || []
+    } catch (err) {
+      console.warn('[AUDIT] Audit logs not available:', err)
+      return []
+    }
+  },
+
+  async getByCategory(category: string): Promise<AuditLogEntry[]> {
+    const supabase = getSupabaseClient()
+    try {
+      const { data, error } = await supabase
+        .from('audit_logs')
+        .select('*')
+        .eq('category', category)
+        .order('created_at', { ascending: false })
+
+      if (error) return []
+      return data || []
+    } catch {
+      return []
+    }
   },
 }
 

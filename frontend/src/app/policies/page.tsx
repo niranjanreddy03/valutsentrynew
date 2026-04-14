@@ -6,6 +6,7 @@ import Header from '@/components/layout/Header'
 import { Button, Card, Input, Select, Badge } from '@/components/ui'
 import { useToast } from '@/contexts/ToastContext'
 import { policyService, Policy, PolicyCondition } from '@/services/api'
+import { isDemoMode } from '@/lib/demoData'
 import {
   Shield,
   Plus,
@@ -80,8 +81,8 @@ const conditionOperators = [
   { value: 'regex', label: 'Matches Regex' },
 ]
 
-// Default policies from backend
-const defaultPolicies: LocalPolicy[] = [
+// Demo policies shown only in demo mode
+const DEMO_POLICIES: LocalPolicy[] = [
   {
     id: 'policy-1',
     name: 'Critical Secret Alert',
@@ -144,15 +145,49 @@ const defaultPolicies: LocalPolicy[] = [
   },
 ]
 
+const POLICIES_STORAGE_KEY = 'vaultsentry_policies'
+
 export default function PoliciesPage() {
   const [sidebarOpen, setSidebarOpen] = useState(true)
-  const [policies, setPolicies] = useState<LocalPolicy[]>(defaultPolicies)
+  const [policies, setPolicies] = useState<LocalPolicy[]>([])
   const [searchQuery, setSearchQuery] = useState('')
   const [expandedPolicy, setExpandedPolicy] = useState<string | null>(null)
   const [editingPolicy, setEditingPolicy] = useState<LocalPolicy | null>(null)
   const [isCreating, setIsCreating] = useState(false)
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(true)
   const toast = useToast()
+
+  useEffect(() => {
+    loadPolicies()
+  }, [])
+
+  // Persist policies to localStorage whenever they change
+  useEffect(() => {
+    if (!loading && !isDemoMode()) {
+      localStorage.setItem(POLICIES_STORAGE_KEY, JSON.stringify(policies))
+    }
+  }, [policies, loading])
+
+  const loadPolicies = () => {
+    if (isDemoMode()) {
+      setPolicies(DEMO_POLICIES)
+      setLoading(false)
+      return
+    }
+
+    // Load from localStorage for real accounts
+    try {
+      const stored = localStorage.getItem(POLICIES_STORAGE_KEY)
+      if (stored) {
+        setPolicies(JSON.parse(stored))
+      } else {
+        setPolicies([])
+      }
+    } catch {
+      setPolicies([])
+    }
+    setLoading(false)
+  }
 
   const filteredPolicies = policies.filter(p => 
     p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -408,10 +443,13 @@ export default function PoliciesPage() {
           </div>
 
           {/* Empty State */}
-          {filteredPolicies.length === 0 && (
-            <div className="text-center py-12">
+          {!loading && filteredPolicies.length === 0 && (
+            <div className="text-center py-16">
               <Shield className="w-12 h-12 text-[var(--text-muted)] mx-auto mb-4" />
-              <p className="text-[var(--text-muted)]">No policies found</p>
+              <h3 className="text-lg font-medium text-[var(--text-secondary)]">No security policies yet</h3>
+              <p className="text-[var(--text-muted)] mt-2 max-w-md mx-auto">
+                Create policies to automate actions when secrets are detected — like alerting your team, blocking PRs, or auto-rotating credentials.
+              </p>
               <Button onClick={startCreate} className="mt-4">
                 <Plus className="w-4 h-4 mr-2" />
                 Create Your First Policy

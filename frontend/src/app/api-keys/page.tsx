@@ -4,6 +4,9 @@ import Header from '@/components/layout/Header'
 import Sidebar from '@/components/layout/Sidebar'
 import { Badge, Button, Card, Modal, Skeleton } from '@/components/ui'
 import { useToast } from '@/contexts/ToastContext'
+import { isDemoMode } from '@/lib/demoData'
+import { apiKeyService } from '@/services/supabase'
+import type { ApiKey as DbApiKey } from '@/lib/supabase/types'
 import {
     AlertTriangle,
     Calendar,
@@ -18,7 +21,8 @@ import {
 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
-interface ApiKey {
+// Local display type that works for both demo and real data
+interface ApiKeyDisplay {
   id: number
   name: string
   key: string
@@ -31,7 +35,7 @@ interface ApiKey {
   created_by: string
 }
 
-const DEMO_API_KEYS: ApiKey[] = [
+const DEMO_API_KEYS: ApiKeyDisplay[] = [
   {
     id: 1,
     name: 'CI/CD Pipeline',
@@ -94,9 +98,25 @@ const AVAILABLE_PERMISSIONS = [
   { id: 'webhook:write', label: 'Webhooks', description: 'Manage webhooks' },
 ]
 
+// Convert DB api key to display format
+function dbKeyToDisplay(dbKey: DbApiKey): ApiKeyDisplay {
+  return {
+    id: dbKey.id,
+    name: dbKey.name,
+    key: `${dbKey.key_prefix}••••••••••••••••••••••`,
+    prefix: dbKey.key_prefix,
+    permissions: dbKey.permissions || [],
+    status: dbKey.is_active ? 'active' : 'revoked',
+    last_used: dbKey.last_used_at,
+    expires_at: dbKey.expires_at,
+    created_at: dbKey.created_at,
+    created_by: '',
+  }
+}
+
 export default function ApiKeysPage() {
   const [sidebarOpen, setSidebarOpen] = useState(true)
-  const [apiKeys, setApiKeys] = useState<ApiKey[]>([])
+  const [apiKeys, setApiKeys] = useState<ApiKeyDisplay[]>([])
   const [loading, setLoading] = useState(true)
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [showKeyModal, setShowKeyModal] = useState(false)
@@ -105,57 +125,105 @@ export default function ApiKeysPage() {
   const [selectedPermissions, setSelectedPermissions] = useState<string[]>(['scan:read', 'scan:write'])
   const [expiresIn, setExpiresIn] = useState<string>('90')
   const [visibleKeys, setVisibleKeys] = useState<Set<number>>(new Set())
+  const [isDemo, setIsDemo] = useState(false)
   const toast = useToast()
 
   useEffect(() => {
-    setApiKeys(DEMO_API_KEYS)
-    setLoading(false)
+    loadApiKeys()
   }, [])
 
-  const generateRandomKey = () => {
-    const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
-    let key = 'demo_key_'
-    for (let i = 0; i < 32; i++) {
-      key += chars.charAt(Math.floor(Math.random() * chars.length))
+  const loadApiKeys = async () => {
+    if (isDemoMode()) {
+      setIsDemo(true)
+      setApiKeys(DEMO_API_KEYS)
+      setLoading(false)
+      return
     }
-    return key
+
+    try {
+      const dbKeys = await apiKeyService.getAll()
+      setApiKeys(dbKeys.map(dbKeyToDisplay))
+    } catch (err) {
+      console.error('[API KEYS] Failed to load keys:', err)
+      setApiKeys([])
+    } finally {
+      setLoading(false)
+    }
   }
 
-  const handleCreateKey = () => {
+  const handleCreateKey = async () => {
     if (!newKeyName) {
       toast.error('Name required', 'Please enter a name for your API key')
       return
     }
 
-    const key = generateRandomKey()
-    const newApiKey: ApiKey = {
-      id: Date.now(),
-      name: newKeyName,
-      key: key,
-      prefix: 'demo_key_',
-      permissions: selectedPermissions,
-      status: 'active',
-      last_used: null,
-      expires_at: expiresIn !== 'never' 
-        ? new Date(Date.now() + parseInt(expiresIn) * 24 * 60 * 60 * 1000).toISOString()
-        : null,
-      created_at: new Date().toISOString(),
-      created_by: 'demo@VaultSentry.io',
+    if (isDemo) {
+      // Demo mode: generate a fake key locally
+      const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
+      let key = 'demo_key_'
+      for (let i = 0; i < 32; i++) {
+        key += chars.charAt(Math.floor(Math.random() * chars.length))
+      }
+      const newApiKey: ApiKeyDisplay = {
+        id: Date.now(),
+        name: newKeyName,
+        key: key,
+        prefix: 'demo_key_',
+        permissions: selectedPermissions,
+        status: 'active',
+        last_used: null,
+        expires_at: expiresIn !== 'never'
+          ? new Date(Date.now() + parseInt(expiresIn) * 24 * 60 * 60 * 1000).toISOString()
+          : null,
+        created_at: new Date().toISOString(),
+        created_by: 'demo@VaultSentry.io',
+      }
+      setApiKeys([newApiKey, ...apiKeys])
+      setNewKey(key)
+      setShowCreateModal(false)
+      setShowKeyModal(true)
+      setNewKeyName('')
+      setSelectedPermissions(['scan:read', 'scan:write'])
+      return
     }
 
-    setApiKeys([newApiKey, ...apiKeys])
-    setNewKey(key)
-    setShowCreateModal(false)
-    setShowKeyModal(true)
-    setNewKeyName('')
-    setSelectedPermissions(['scan:read', 'scan:write'])
+    // Real mode: create via Supabase
+    try {
+      const { key, apiKey: dbKey } = await apiKeyService.create(newKeyName, selectedPermissions)
+      const displayKey = dbKeyToDisplay(dbKey)
+      displayKey.key = key // Show the actual key only this one time
+      setApiKeys([displayKey, ...apiKeys])
+      setNewKey(key)
+      setShowCreateModal(false)
+      setShowKeyModal(true)
+      setNewKeyName('')
+      setSelectedPermissions(['scan:read', 'scan:write'])
+      toast.success('API key created successfully')
+    } catch (err: any) {
+      console.error('[API KEYS] Failed to create key:', err)
+      toast.error('Failed to create API key', err.message || 'Please try again')
+    }
   }
 
-  const handleRevokeKey = (keyId: number) => {
-    setApiKeys(apiKeys.map(k => 
-      k.id === keyId ? { ...k, status: 'revoked' as const } : k
-    ))
-    toast.success('API key revoked')
+  const handleRevokeKey = async (keyId: number) => {
+    if (isDemo) {
+      setApiKeys(apiKeys.map(k =>
+        k.id === keyId ? { ...k, status: 'revoked' as const } : k
+      ))
+      toast.success('API key revoked')
+      return
+    }
+
+    try {
+      await apiKeyService.revoke(keyId)
+      setApiKeys(apiKeys.map(k =>
+        k.id === keyId ? { ...k, status: 'revoked' as const } : k
+      ))
+      toast.success('API key revoked')
+    } catch (err: any) {
+      console.error('[API KEYS] Failed to revoke key:', err)
+      toast.error('Failed to revoke key', err.message || 'Please try again')
+    }
   }
 
   const copyToClipboard = (text: string) => {
@@ -457,7 +525,7 @@ export default function ApiKeysPage() {
             <div className="flex items-start gap-2">
               <AlertTriangle className="w-5 h-5 text-yellow-400 flex-shrink-0" />
               <p className="text-sm text-[var(--text-secondary)]">
-                Make sure to copy your API key now. You won't be able to see it again!
+                Make sure to copy your API key now. You won&apos;t be able to see it again!
               </p>
             </div>
           </div>
