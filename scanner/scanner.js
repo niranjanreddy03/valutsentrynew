@@ -2,13 +2,19 @@
 
 /**
  * VaultSentry Node.js Scanning Engine
- * scanner.js — File-level scanning logic
+ * scanner.js — File-level scanning logic (optimized)
  *
- * Responsibilities:
- *  - Read a single file safely (UTF-8, skipping binary/large files)
- *  - Apply all detection rules
- *  - Deduplicate findings within the file (by hash)
- *  - Return structured Finding objects
+ * Hot-path optimizations vs. the naive implementation:
+ *   * Binary-file detection via a small Buffer read (4 KB NUL-byte sniff)
+ *     BEFORE decoding the whole file as UTF-8.
+ *   * Per-rule literal trigger pre-filter: if a rule's cheap substring
+ *     triggers never appear in the file, its regex is skipped entirely.
+ *   * O(log n) line-number lookup via a precomputed newline offset index
+ *     (binary search), replacing O(n) slice+split per match.
+ *   * Lazy split of the file into lines — only performed when the first
+ *     finding actually needs a snippet.
+ *   * Inline dedup using raw value (not hash) as the short-circuit key,
+ *     avoiding redundant SHA-256 work on duplicates.
  */
 
 const fs = require('fs');
@@ -21,6 +27,9 @@ const logger = require('./logger');
 
 /** Maximum file size in bytes to read (default 2 MB) */
 const MAX_FILE_SIZE = 2 * 1024 * 1024;
+
+/** Bytes sampled from the head of each file for the binary sniff. */
+const BINARY_SNIFF_BYTES = 4096;
 
 /** Binary file extensions that should be skipped */
 const BINARY_EXTENSIONS = new Set([
@@ -69,10 +78,11 @@ function sha256(value) {
 function maskValue(value) {
   if (!value || typeof value !== 'string') return '****';
   const VISIBLE = 4;
-  if (value.length <= VISIBLE * 2) return '*'.repeat(value.length);
+  const len = value.length;
+  if (len <= VISIBLE * 2) return '*'.repeat(len);
   return (
     value.slice(0, VISIBLE) +
-    '*'.repeat(Math.max(0, value.length - VISIBLE * 2)) +
+    '*'.repeat(len - VISIBLE * 2) +
     value.slice(-VISIBLE)
   );
 }
@@ -84,7 +94,10 @@ function maskValue(value) {
  */
 function isTestFile(filePath) {
   const lower = filePath.toLowerCase();
-  return TEST_FILE_INDICATORS.some((indicator) => lower.includes(indicator));
+  for (const indicator of TEST_FILE_INDICATORS) {
+    if (lower.includes(indicator)) return true;
+  }
+  return false;
 }
 
 /**
@@ -116,11 +129,64 @@ function shouldExcludeDir(dirName) {
   return EXCLUDED_DIRS.has(dirName);
 }
 
+/**
+ * Build an array of offsets of every '\n' in `content` for O(log n)
+ * offset → line number lookup via binary search.
+ * @param {string} content
+ * @returns {number[]}
+ */
+function buildLineOffsetIndex(content) {
+  const offsets = [];
+  let idx = content.indexOf('\n');
+  while (idx !== -1) {
+    offsets.push(idx);
+    idx = content.indexOf('\n', idx + 1);
+  }
+  return offsets;
+}
+
+/**
+ * Binary search an offset in the newline-offset index and return the 1-based
+ * line number it falls on.
+ * @param {number[]} offsets  Sorted ascending newline offsets.
+ * @param {number}   target   Character offset in the original content.
+ * @returns {number}          1-based line number.
+ */
+function lineNumberForOffset(offsets, target) {
+  // Equivalent of Python's bisect_right: leftmost index with offsets[i] > target.
+  let lo = 0;
+  let hi = offsets.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1;
+    if (offsets[mid] <= target) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo + 1;
+}
+
+/**
+ * Read up to `limit` bytes from `filePath` as a Buffer (single fd, then close).
+ * Used for the binary-sniff step before we commit to decoding the whole file.
+ * @param {string} filePath
+ * @param {number} limit
+ * @returns {Promise<Buffer>}
+ */
+async function readHeadBytes(filePath, limit) {
+  const fh = await fs.promises.open(filePath, 'r');
+  try {
+    const buf = Buffer.allocUnsafe(limit);
+    const { bytesRead } = await fh.read(buf, 0, limit, 0);
+    return buf.subarray(0, bytesRead);
+  } finally {
+    await fh.close();
+  }
+}
+
 // ─── Core scanner ─────────────────────────────────────────────────────────────
 
 /**
  * @typedef {Object} Finding
- * @property {string}  id         UUID-like SHA hash (finding-level unique key)
+ * @property {string}  id         SHA-derived finding-level unique key
  * @property {string}  ruleId     Rule identifier
  * @property {string}  type       Human-readable secret type
  * @property {string}  category   aws | github | jwt | …
@@ -152,6 +218,7 @@ async function scanFile(filePath, options = {}) {
     basePath = '',
   } = options;
 
+  /** @type {Finding[]} */
   const findings = [];
 
   // ── File stat ──
@@ -171,87 +238,128 @@ async function scanFile(filePath, options = {}) {
     return findings;
   }
 
+  if (stat.size === 0) return findings;
+
+  // ── Binary sniff on the head before reading the full file as utf8. ──
+  // This catches un-extensioned binaries and saves us from decoding multi-MB
+  // blobs that will be thrown away.
+  let head;
+  try {
+    head = await readHeadBytes(filePath, Math.min(BINARY_SNIFF_BYTES, stat.size));
+  } catch (err) {
+    logger.warn(`Cannot read file: ${filePath} — ${err.message}`);
+    return findings;
+  }
+  if (head.includes(0x00)) {
+    logger.debug(`Skipping binary file (null byte): ${filePath}`);
+    return findings;
+  }
+
   // ── Read content ──
   let content;
   try {
-    content = await fs.promises.readFile(filePath, { encoding: 'utf8' });
+    if (stat.size <= head.length) {
+      // We already have the whole file in `head`.
+      content = head.toString('utf8');
+    } else {
+      content = await fs.promises.readFile(filePath, { encoding: 'utf8' });
+    }
   } catch (err) {
-    // Could be a binary file Node couldn't read gracefully — skip silently.
     logger.warn(`Cannot read file: ${filePath} — ${err.message}`);
     return findings;
   }
 
   if (!content || !content.trim()) return findings;
 
-  // Quick binary sniff: if the first 8 KB contains a NULL byte, treat as binary.
-  if (content.slice(0, 8192).includes('\0')) {
-    logger.debug(`Skipping binary file (null byte): ${filePath}`);
-    return findings;
-  }
-
-  const lines = content.split('\n');
+  // ── Per-file precomputation used by all rules ──
+  const contentLower = content.toLowerCase();
   const displayPath = basePath ? path.relative(basePath, filePath) : filePath;
+  const displayPathSlashes = displayPath.replace(/\\/g, '/');
   const testFile = isTestFile(filePath);
 
-  // ── Deduplication set (within this file) ──
-  const seenHashes = new Set();
+  // Lazily built on first finding — very often a file has zero findings and
+  // the cost of splitting a big file into an array of lines is pure waste.
+  let lines = null;
+  let lineOffsets = null;
+
+  /** @type {Set<string>} dedup key = `${ruleId}::${rawValue}` */
+  const seen = new Set();
 
   // ── Apply rules ──
   for (const rule of ALL_RULES) {
+    // ── Literal pre-filter ──
+    // If any trigger is configured and none appears in the file, skip the
+    // entire regex pass for this rule.
+    const triggers = rule.triggers;
+    if (triggers && triggers.length > 0) {
+      let anyTrigger = false;
+      for (let i = 0; i < triggers.length; i++) {
+        if (contentLower.indexOf(triggers[i]) !== -1) {
+          anyTrigger = true;
+          break;
+        }
+      }
+      if (!anyTrigger) continue;
+    }
+
     // IMPORTANT: Reset regex lastIndex because rules share pattern objects.
     rule.pattern.lastIndex = 0;
 
     let match;
     while ((match = rule.pattern.exec(content)) !== null) {
-      // Extract the best capture group or fall back to full match.
-      const rawValue = match[1] !== undefined ? match[1] : match[0];
+      const hasGroup = match[1] !== undefined;
+      const rawValue = hasGroup ? match[1] : match[0];
+
+      // ── Dedup by (ruleId, rawValue) BEFORE hashing ──
+      const dedupKey = rule.id + '::' + rawValue;
+      if (seen.has(dedupKey)) continue;
 
       // ── False positive check ──
       if (rule.falsePositives && rule.falsePositives.length > 0) {
-        const isFalsePositive = rule.falsePositives.some((fp) => fp.test(rawValue));
-        if (isFalsePositive) continue;
+        let isFalsePositive = false;
+        for (const fp of rule.falsePositives) {
+          if (fp.test(rawValue)) { isFalsePositive = true; break; }
+        }
+        if (isFalsePositive) { seen.add(dedupKey); continue; }
+      }
+      seen.add(dedupKey);
+
+      // ── Hash once per distinct finding ──
+      const valueHash = sha256(rawValue);
+
+      // ── Line number via precomputed offset index (lazy init) ──
+      if (lineOffsets === null) lineOffsets = buildLineOffsetIndex(content);
+      const valueStart = hasGroup ? match.index + match[0].indexOf(rawValue) : match.index;
+      const lineNumber = lineNumberForOffset(lineOffsets, valueStart);
+
+      // ── Snippet — line above, the match line, line below (lazy lines split) ──
+      if (lines === null) lines = content.split('\n');
+      const snippetStart = Math.max(0, lineNumber - 2);
+      const snippetEnd = Math.min(lines.length - 1, lineNumber);
+      let snippet = '';
+      for (let i = snippetStart; i <= snippetEnd; i++) {
+        if (snippet) snippet += '\n';
+        snippet += (i + 1) + ': ' + lines[i];
       }
 
-      // ── Dedup by (ruleId + hash) ──
-      const valueHash = sha256(rawValue);
-      const dedupKey = `${rule.id}::${valueHash}`;
-      if (seenHashes.has(dedupKey)) continue;
-      seenHashes.add(dedupKey);
-
-      // ── Line number (1-based) ──
-      const textBefore = content.slice(0, match.index);
-      const lineNumber = textBefore.split('\n').length;
-
-      // ── Snippet — line above, the match line, line below ──
-      const snippetStart = Math.max(0, lineNumber - 2);
-      const snippetEnd = Math.min(lines.length - 1, lineNumber);  // lineNumber is 1-based
-      const snippet = lines
-        .slice(snippetStart, snippetEnd + 1)
-        .map((l, i) => `${snippetStart + i + 1}: ${l}`)
-        .join('\n');
+      const maskedValue = maskValue(rawValue);
 
       /** @type {Finding} */
       const finding = {
-        id: sha256(`${filePath}::${rule.id}::${valueHash}::${lineNumber}`),
+        id: sha256(filePath + '::' + rule.id + '::' + valueHash + '::' + lineNumber),
         ruleId: rule.id,
         type: rule.type,
         category: rule.category,
         severity: rule.severity,
         confidence: rule.confidence,
-        file: displayPath.replace(/\\/g, '/'),
+        file: displayPathSlashes,
         line: lineNumber,
-        maskedValue: maskValue(rawValue),
+        maskedValue,
         hash: valueHash,
         isTestFile: testFile,
         snippet,
+        value: (!maskValues || includeRawValue) ? rawValue : maskedValue,
       };
-
-      // Only include the raw value when explicitly requested.
-      if (!maskValues || includeRawValue) {
-        finding.value = rawValue;
-      } else {
-        finding.value = finding.maskedValue;
-      }
 
       findings.push(finding);
     }

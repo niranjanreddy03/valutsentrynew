@@ -420,4 +420,72 @@ const ALL_RULES = [
   ...AZURE_RULES,
 ];
 
-module.exports = { ALL_RULES };
+/**
+ * Cheap literal substring triggers used to short-circuit regex work.
+ * Before running a rule's regex against a file, the scanner checks
+ * whether the file's lowercased content contains at least one of the
+ * rule's triggers. If not, the rule's regex is skipped entirely.
+ *
+ * Triggers are lowercased and match against a lowercased copy of the
+ * content. All listed regex patterns are case-insensitive where we use
+ * case-insensitive triggers, so this is a safe optimization.
+ *
+ * Empty array (or missing entry) = always run the regex.
+ * @type {Record<string, string[]>}
+ */
+const RULE_TRIGGERS = {
+  // AWS
+  'aws-access-key-id': ['akia', 'a3t', 'abia', 'acca', 'agpa', 'aida',
+                        'aipa', 'aroa', 'apka', 'asca', 'asia'],
+  'aws-secret-access-key': ['aws_secret', 'secret_access_key'],
+  'aws-session-token': ['aws_session_token', 'session_token'],
+  'aws-account-id': ['aws_account_id', 'account_id', 'account-id'],
+  // Google
+  'google-api-key': ['aiza'],
+  'google-oauth-token': ['ya29.'],
+  'google-service-account': ['"type"', 'service_account'],
+  // GitHub
+  'github-pat-classic': ['ghp_'],
+  'github-pat-fine-grained': ['github_pat_'],
+  'github-oauth-token': ['gho_'],
+  'github-app-token': ['ghu_', 'ghs_'],
+  'github-refresh-token': ['ghr_'],
+  // JWT
+  'jwt-token': ['eyj'],
+  'jwt-secret': ['jwt_secret', 'jwt-secret', 'jwt_key', 'jwt-key'],
+  // Private keys
+  'rsa-private-key': ['-----begin rsa private key-----'],
+  'openssh-private-key': ['-----begin openssh private key-----'],
+  'ec-private-key': ['-----begin ec private key-----'],
+  'pgp-private-key': ['-----begin pgp private key block-----'],
+  // Database
+  'postgres-connection': ['postgres://', 'postgresql://'],
+  'mysql-connection': ['mysql://'],
+  'mongodb-connection': ['mongodb://', 'mongodb+srv://'],
+  'redis-connection': ['redis://'],
+  // Passwords
+  'hardcoded-password': ['password', 'passwd', 'pwd', 'pass'],
+  'hardcoded-secret-key': ['secret_key', 'secret-key', 'api_secret', 'api-secret'],
+  // API keys
+  'stripe-key': ['sk_live', 'sk_test', 'pk_live', 'pk_test'],
+  'slack-token': ['xoxb-', 'xoxa-', 'xoxp-', 'xoxr-', 'xoxs-'],
+  'slack-webhook': ['hooks.slack.com/services'],
+  'sendgrid-key': ['sg.'],
+  'npm-token': ['npm_'],
+  'twilio-key': ['sk'],
+  'generic-api-key': ['api_key', 'apikey', 'api-key'],
+  // OAuth
+  'oauth-client-secret': ['client_secret', 'oauth_secret',
+                          'client-secret', 'oauth-secret'],
+  'facebook-token': ['eaa'],
+  // Azure
+  'azure-storage-key': ['defaultendpointsprotocol', 'accountkey='],
+  'azure-client-secret': ['client_secret', 'clientsecret'],
+};
+
+// Attach triggers to each rule exactly once at module load.
+for (const rule of ALL_RULES) {
+  rule.triggers = RULE_TRIGGERS[rule.id] || [];
+}
+
+module.exports = { ALL_RULES, RULE_TRIGGERS };
