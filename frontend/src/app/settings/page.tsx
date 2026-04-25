@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
+import Link from 'next/link'
 import Sidebar from '@/components/layout/Sidebar'
 import Header from '@/components/layout/Header'
 import { Button, Card, Input, Select, Badge } from '@/components/ui'
@@ -12,6 +13,7 @@ import {
   User,
   Bell,
   Shield,
+  ShieldCheck,
   Key,
   Palette,
   Globe,
@@ -28,9 +30,20 @@ import {
   Plus,
   Check,
   X,
+  Camera,
+  CalendarDays,
+  Clock,
+  Smartphone,
+  BadgeCheck,
+  ArrowRight,
+  AlertTriangle,
+  Download,
+  KeyRound,
 } from 'lucide-react'
 
-type TabId = 'profile' | 'notifications' | 'security' | 'integrations' | 'api' | 'advanced'
+// NOTE: Integrations moved to the dedicated /integrations page so connection
+// state lives in one place. The tab here is intentionally removed.
+type TabId = 'profile' | 'notifications' | 'security' | 'api' | 'advanced'
 
 interface Tab {
   id: TabId
@@ -42,7 +55,6 @@ const tabs: Tab[] = [
   { id: 'profile', label: 'Profile', icon: <User className="w-4 h-4" /> },
   { id: 'notifications', label: 'Notifications', icon: <Bell className="w-4 h-4" /> },
   { id: 'security', label: 'Security', icon: <Shield className="w-4 h-4" /> },
-  { id: 'integrations', label: 'Integrations', icon: <Globe className="w-4 h-4" /> },
   { id: 'api', label: 'API Keys', icon: <Key className="w-4 h-4" /> },
   { id: 'advanced', label: 'Advanced', icon: <Settings className="w-4 h-4" /> },
 ]
@@ -52,13 +64,12 @@ export default function SettingsPage() {
   const [activeTab, setActiveTab] = useState<TabId>('profile')
   const [saving, setSaving] = useState(false)
   const toast = useToast()
-  const { user, supabaseUser } = useAuth()
+  const { user, supabaseUser, updateProfile, refreshSession } = useAuth()
 
   // Profile state
   const [profile, setProfile] = useState({
     fullName: '',
     email: '',
-    username: '',
     company: '',
     role: '',
     timezone: 'America/New_York',
@@ -74,7 +85,6 @@ export default function SettingsPage() {
       ...prev,
       fullName,
       email,
-      username: email?.split('@')[0] || '',
       role,
     }))
   }, [user, supabaseUser])
@@ -96,11 +106,48 @@ export default function SettingsPage() {
     sessionTimeout: '30',
     ipWhitelist: '',
   })
+  const [verifiedFactorId, setVerifiedFactorId] = useState<string | null>(null)
+
+  // Pull real MFA enrollment state from Supabase on mount so the "Enabled"
+  // badge reflects reality instead of a hardcoded false.
+  useEffect(() => {
+    let cancelled = false
+    const loadMfa = async () => {
+      try {
+        const { data, error } = await supabase.auth.mfa.listFactors()
+        if (error || cancelled) return
+        const verified = data?.totp?.find((f: any) => f.status === 'verified')
+        setSecurity((s) => ({ ...s, twoFactorEnabled: !!verified }))
+        setVerifiedFactorId(verified?.id ?? null)
+      } catch {
+        /* ignore */
+      }
+    }
+    loadMfa()
+    return () => {
+      cancelled = true
+    }
+  }, [supabaseUser?.id])
+
+  const disableTwoFactor = async () => {
+    if (!verifiedFactorId) {
+      setSecurity({ ...security, twoFactorEnabled: false })
+      return
+    }
+    try {
+      const { error } = await supabase.auth.mfa.unenroll({ factorId: verifiedFactorId })
+      if (error) throw error
+      setSecurity({ ...security, twoFactorEnabled: false })
+      setVerifiedFactorId(null)
+      toast.success('2FA disabled', 'Two-factor authentication has been turned off')
+    } catch (err: any) {
+      toast.error('Could not disable 2FA', err?.message || 'Please try again')
+    }
+  }
 
   // Integration settings
   const [integrations, setIntegrations] = useState({
     githubConnected: false,
-    githubUsername: '',
     githubToken: '',
     showGithubToken: false,
     gitlabConnected: false,
@@ -130,7 +177,6 @@ export default function SettingsPage() {
           setIntegrations(prev => ({
             ...prev,
             githubConnected: data.configured,
-            githubUsername: data.github_username || '',
             // Token is NEVER returned from backend for security
             githubToken: data.configured ? '••••••••••••••••' : '',
           }))
@@ -188,7 +234,6 @@ export default function SettingsPage() {
       setIntegrations(prev => ({
         ...prev,
         githubConnected: true,
-        githubUsername: data.github_username || '',
         githubToken: '••••••••••••••••', // Never show actual token
       }))
     } catch (error: any) {
@@ -223,7 +268,6 @@ export default function SettingsPage() {
       setIntegrations(prev => ({
         ...prev,
         githubConnected: false,
-        githubUsername: '',
         githubToken: '',
       }))
     } catch (error: any) {
@@ -345,71 +389,143 @@ export default function SettingsPage() {
                 <Card className="p-6">
                   {/* Profile Settings */}
                   {activeTab === 'profile' && (
-                    <div className="space-y-6">
-                      <h2 className="text-lg font-semibold text-[var(--text-primary)]">Profile Settings</h2>
+                    <div className="space-y-8">
+                      {/* Identity header: avatar + name/email + role */}
+                      <div className="flex flex-col sm:flex-row sm:items-center gap-5 pb-6 border-b border-[var(--border-color)]">
+                        <div className="relative">
+                          <div
+                            className="w-20 h-20 rounded-2xl flex items-center justify-center text-[26px] font-semibold shadow-[0_8px_28px_-8px_rgba(59,130,246,0.55)]"
+                            style={{
+                              background: 'linear-gradient(135deg, #3b82f6 0%, #60a5fa 100%)',
+                              color: '#fff',
+                            }}
+                          >
+                            {(profile.fullName || profile.email || '?')
+                              .trim()
+                              .split(/\s+/)
+                              .map((n) => n[0])
+                              .filter(Boolean)
+                              .slice(0, 2)
+                              .join('')
+                              .toUpperCase() || '?'}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => toast.info('Coming soon', 'Avatar upload will be available shortly')}
+                            className="absolute -bottom-1.5 -right-1.5 h-8 w-8 rounded-full flex items-center justify-center border border-[var(--border-color)] bg-[var(--bg-tertiary)] text-[var(--text-primary)] hover:bg-[var(--bg-secondary)] transition-colors shadow"
+                            aria-label="Change avatar"
+                          >
+                            <Camera className="w-4 h-4" />
+                          </button>
+                        </div>
 
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <div>
-                          <label className="block text-sm text-[var(--text-muted)] mb-2">Full Name</label>
-                          <Input
-                            value={profile.fullName}
-                            onChange={(e) => setProfile({ ...profile, fullName: e.target.value })}
-                            placeholder="Your full name"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-sm text-[var(--text-muted)] mb-2">Username</label>
-                          <Input
-                            value={profile.username}
-                            onChange={(e) => setProfile({ ...profile, username: e.target.value })}
-                            placeholder="Username"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-sm text-[var(--text-muted)] mb-2">Email Address</label>
-                          <Input
-                            type="email"
-                            value={profile.email}
-                            onChange={(e) => setProfile({ ...profile, email: e.target.value })}
-                            placeholder="email@example.com"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-sm text-[var(--text-muted)] mb-2">Company</label>
-                          <Input
-                            value={profile.company}
-                            onChange={(e) => setProfile({ ...profile, company: e.target.value })}
-                            placeholder="Company name"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-sm text-[var(--text-muted)] mb-2">Role</label>
-                          <Select
-                            value={profile.role}
-                            onChange={(value) => setProfile({ ...profile, role: value })}
-                            options={[
-                              { value: 'admin', label: 'Admin' },
-                              { value: 'developer', label: 'Developer' },
-                            ]}
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-sm text-[var(--text-muted)] mb-2">Timezone</label>
-                          <Select
-                            value={profile.timezone}
-                            onChange={(value) => setProfile({ ...profile, timezone: value })}
-                            options={[
-                              { value: 'America/New_York', label: 'Eastern Time (ET)' },
-                              { value: 'America/Chicago', label: 'Central Time (CT)' },
-                              { value: 'America/Denver', label: 'Mountain Time (MT)' },
-                              { value: 'America/Los_Angeles', label: 'Pacific Time (PT)' },
-                              { value: 'Europe/London', label: 'London (GMT)' },
-                              { value: 'Europe/Paris', label: 'Paris (CET)' },
-                              { value: 'Asia/Tokyo', label: 'Tokyo (JST)' },
-                            ]}
-                          />
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <h2 className="text-xl font-semibold text-[var(--text-primary)] truncate">
+                              {profile.fullName || 'Unnamed user'}
+                            </h2>
+                            {supabaseUser?.email_confirmed_at && (
+                              <Badge variant="success" className="gap-1">
+                                <BadgeCheck className="w-3 h-3" />
+                                Verified
+                              </Badge>
+                            )}
+                            {profile.role && (
+                              <Badge variant="info" className="capitalize">
+                                {profile.role}
+                              </Badge>
+                            )}
+                          </div>
+                          <p className="text-sm text-[var(--text-muted)] mt-1 truncate">
+                            {profile.email || 'No email on file'}
+                          </p>
+                          <div className="flex items-center gap-4 mt-3 text-xs text-[var(--text-muted)]">
+                            {supabaseUser?.created_at && (
+                              <span className="inline-flex items-center gap-1.5">
+                                <CalendarDays className="w-3.5 h-3.5" />
+                                Joined {new Date(supabaseUser.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
+                              </span>
+                            )}
+                            {supabaseUser?.last_sign_in_at && (
+                              <span className="inline-flex items-center gap-1.5">
+                                <Clock className="w-3.5 h-3.5" />
+                                Last sign-in {new Date(supabaseUser.last_sign_in_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                              </span>
+                            )}
+                          </div>
                         </div>
                       </div>
+
+                      {/* Personal info */}
+                      <div>
+                        <h3 className="text-sm font-medium text-[var(--text-secondary)] mb-4">Personal information</h3>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                          <div>
+                            <label className="block text-sm text-[var(--text-muted)] mb-2">Full Name</label>
+                            <Input
+                              value={profile.fullName}
+                              onChange={(e) => setProfile({ ...profile, fullName: e.target.value })}
+                              placeholder="Your full name"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm text-[var(--text-muted)] mb-2 flex items-center gap-2">
+                              Email Address
+                              {supabaseUser?.email_confirmed_at ? (
+                                <span className="text-[11px] text-green-500 inline-flex items-center gap-0.5">
+                                  <Check className="w-3 h-3" /> verified
+                                </span>
+                              ) : (
+                                <span className="text-[11px] text-yellow-500 inline-flex items-center gap-0.5">
+                                  <AlertTriangle className="w-3 h-3" /> unverified
+                                </span>
+                              )}
+                            </label>
+                            <Input
+                              type="email"
+                              value={profile.email}
+                              onChange={(e) => setProfile({ ...profile, email: e.target.value })}
+                              placeholder="email@example.com"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm text-[var(--text-muted)] mb-2">Company</label>
+                            <Input
+                              value={profile.company}
+                              onChange={(e) => setProfile({ ...profile, company: e.target.value })}
+                              placeholder="Company name"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm text-[var(--text-muted)] mb-2">Role</label>
+                            <Select
+                              value={profile.role}
+                              onChange={(value) => setProfile({ ...profile, role: value })}
+                              options={[
+                                { value: 'admin', label: 'Admin' },
+                                { value: 'developer', label: 'Developer' },
+                              ]}
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm text-[var(--text-muted)] mb-2">Timezone</label>
+                            <Select
+                              value={profile.timezone}
+                              onChange={(value) => setProfile({ ...profile, timezone: value })}
+                              options={[
+                                { value: 'America/New_York', label: 'Eastern Time (ET)' },
+                                { value: 'America/Chicago', label: 'Central Time (CT)' },
+                                { value: 'America/Denver', label: 'Mountain Time (MT)' },
+                                { value: 'America/Los_Angeles', label: 'Pacific Time (PT)' },
+                                { value: 'Europe/London', label: 'London (GMT)' },
+                                { value: 'Europe/Paris', label: 'Paris (CET)' },
+                                { value: 'Asia/Tokyo', label: 'Tokyo (JST)' },
+                              ]}
+                            />
+                          </div>
+                        </div>
+                      </div>
+
                     </div>
                   )}
 
@@ -501,19 +617,133 @@ export default function SettingsPage() {
                       <h2 className="text-lg font-semibold text-[var(--text-primary)]">Security Settings</h2>
 
                       <div className="space-y-6">
-                        <div className="p-4 bg-[var(--bg-secondary)] rounded-lg">
-                          <div className="flex items-center justify-between mb-4">
-                            <div>
-                              <p className="text-[var(--text-primary)] font-medium">Two-Factor Authentication</p>
-                              <p className="text-[var(--text-muted)] text-sm">Add an extra layer of security to your account</p>
+                        {/* 2FA hero card */}
+                        <div
+                          className="relative overflow-hidden rounded-xl border border-[var(--border-color)]"
+                          style={{ background: 'var(--bg-secondary)' }}
+                        >
+                          <div
+                            aria-hidden
+                            className="pointer-events-none absolute -top-24 -right-24 h-64 w-64 rounded-full blur-3xl"
+                            style={{
+                              background: security.twoFactorEnabled
+                                ? 'radial-gradient(closest-side, rgba(16,185,129,0.25), transparent 70%)'
+                                : 'radial-gradient(closest-side, rgba(59,130,246,0.20), transparent 70%)',
+                            }}
+                          />
+                          <div className="relative p-5 flex items-start gap-4">
+                            <div
+                              className="h-12 w-12 rounded-xl flex items-center justify-center shrink-0"
+                              style={{
+                                background: security.twoFactorEnabled
+                                  ? 'rgba(16,185,129,0.12)'
+                                  : 'rgba(59,130,246,0.12)',
+                                border: security.twoFactorEnabled
+                                  ? '1px solid rgba(16,185,129,0.3)'
+                                  : '1px solid rgba(59,130,246,0.3)',
+                                color: security.twoFactorEnabled ? '#10b981' : '#3b82f6',
+                              }}
+                            >
+                              <ShieldCheck className="w-6 h-6" />
                             </div>
-                            <Badge variant={security.twoFactorEnabled ? 'success' : 'warning'}>
-                              {security.twoFactorEnabled ? 'Enabled' : 'Disabled'}
-                            </Badge>
+
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <p className="text-[var(--text-primary)] font-semibold">
+                                  Two-Factor Authentication
+                                </p>
+                                <Badge variant={security.twoFactorEnabled ? 'success' : 'warning'}>
+                                  {security.twoFactorEnabled ? 'Enabled' : 'Not set up'}
+                                </Badge>
+                              </div>
+                              <p className="text-[var(--text-muted)] text-sm mt-1 max-w-xl">
+                                Protect your account with a second step at sign-in. Even if your password
+                                is compromised, attackers won&apos;t be able to get in.
+                              </p>
+
+                              <div className="mt-4 flex flex-wrap gap-2">
+                                {security.twoFactorEnabled ? (
+                                  <>
+                                    <Button
+                                      variant="secondary"
+                                      onClick={() => toast.info('Backup codes', 'Generate these from the MFA setup screen.')}
+                                    >
+                                      <Download className="w-4 h-4 mr-2" />
+                                      View backup codes
+                                    </Button>
+                                    <Link href="/mfa-setup">
+                                      <Button variant="secondary">
+                                        <RefreshCw className="w-4 h-4 mr-2" />
+                                        Regenerate
+                                      </Button>
+                                    </Link>
+                                    <Button
+                                      variant="secondary"
+                                      onClick={disableTwoFactor}
+                                      className="hover:bg-red-500/10 hover:text-red-500"
+                                    >
+                                      <X className="w-4 h-4 mr-2" />
+                                      Disable
+                                    </Button>
+                                  </>
+                                ) : (
+                                  <Link href="/mfa-setup">
+                                    <Button>
+                                      <ShieldCheck className="w-4 h-4 mr-2" />
+                                      Set up two-factor auth
+                                      <ArrowRight className="w-4 h-4 ml-2" />
+                                    </Button>
+                                  </Link>
+                                )}
+                              </div>
+                            </div>
                           </div>
-                          <Button variant={security.twoFactorEnabled ? 'secondary' : 'primary'}>
-                            {security.twoFactorEnabled ? 'Disable 2FA' : 'Enable 2FA'}
-                          </Button>
+                        </div>
+
+                        {/* Available methods */}
+                        <div>
+                          <h3 className="text-sm font-medium text-[var(--text-secondary)] mb-3">
+                            Authentication methods
+                          </h3>
+                          <div className="space-y-2">
+                            <div className="flex items-center justify-between p-4 rounded-lg bg-[var(--bg-secondary)] border border-[var(--border-color)]">
+                              <div className="flex items-center gap-3">
+                                <div className="h-10 w-10 rounded-lg bg-[var(--bg-tertiary)] flex items-center justify-center">
+                                  <Smartphone className="w-5 h-5 text-[var(--text-primary)]" />
+                                </div>
+                                <div>
+                                  <p className="text-sm font-medium text-[var(--text-primary)]">
+                                    Authenticator app
+                                  </p>
+                                  <p className="text-xs text-[var(--text-muted)]">
+                                    Use 1Password, Authy, Google Authenticator, etc.
+                                  </p>
+                                </div>
+                              </div>
+                              <Badge variant={security.twoFactorEnabled ? 'success' : 'default'}>
+                                {security.twoFactorEnabled ? 'Active' : 'Not configured'}
+                              </Badge>
+                            </div>
+
+                            <div className="flex items-center justify-between p-4 rounded-lg bg-[var(--bg-secondary)] border border-[var(--border-color)]">
+                              <div className="flex items-center gap-3">
+                                <div className="h-10 w-10 rounded-lg bg-[var(--bg-tertiary)] flex items-center justify-center">
+                                  <KeyRound className="w-5 h-5 text-[var(--text-primary)]" />
+                                </div>
+                                <div>
+                                  <p className="text-sm font-medium text-[var(--text-primary)]">
+                                    Recovery codes
+                                  </p>
+                                  <p className="text-xs text-[var(--text-muted)]">
+                                    One-time codes to sign in if you lose your device.
+                                  </p>
+                                </div>
+                              </div>
+                              <Badge variant={security.twoFactorEnabled ? 'success' : 'default'}>
+                                {security.twoFactorEnabled ? 'Available' : 'Not generated'}
+                              </Badge>
+                            </div>
+                          </div>
                         </div>
 
                         <div>
@@ -544,8 +774,10 @@ export default function SettingsPage() {
                     </div>
                   )}
 
-                  {/* Integrations */}
-                  {activeTab === 'integrations' && (
+                  {/* Integrations — moved to /integrations (left for type
+                      safety; this block is unreachable because the tab
+                      is no longer in the `tabs` array). */}
+                  {false && (
                     <div className="space-y-6">
                       <h2 className="text-lg font-semibold text-[var(--text-primary)]">Integrations</h2>
                       
@@ -632,13 +864,6 @@ export default function SettingsPage() {
                                   Revoke Token
                                 </Button>
                               </div>
-                            )}
-                            
-                            {integrations.githubUsername && (
-                              <p className="text-xs text-green-500">
-                                <Check className="w-3 h-3 inline mr-1" />
-                                Connected as <strong>@{integrations.githubUsername}</strong>
-                              </p>
                             )}
                             
                             <div className="p-3 bg-yellow-500/10 border border-yellow-500/20 rounded-lg">

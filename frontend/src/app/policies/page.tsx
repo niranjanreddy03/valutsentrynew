@@ -7,6 +7,17 @@ import { Button, Card, Input, Select, Badge } from '@/components/ui'
 import { useToast } from '@/contexts/ToastContext'
 import { policyService, Policy, PolicyCondition } from '@/services/api'
 import { isDemoMode } from '@/lib/demoData'
+import { evaluatePolicies, type Policy as EnginePolicy, type PolicyFinding } from '@/lib/policyEngine'
+import {
+  getExecutions,
+  clearExecutions,
+  getPolicyWebhooks,
+  setPolicyWebhooks,
+  executeMatches,
+  type PolicyExecution,
+  type PolicyWebhookConfig,
+} from '@/lib/policyExecutor'
+import { getAuthHeaders } from '@/lib/authHeaders'
 import {
   Shield,
   Plus,
@@ -30,7 +41,10 @@ import {
   MoreVertical,
   FileText,
   Bell,
-  RotateCcw
+  RotateCcw,
+  Activity,
+  Settings as SettingsIcon,
+  FlaskConical,
 } from 'lucide-react'
 
 type ActionType = 'alert' | 'block_pr' | 'jira_ticket' | 'slack_notify' | 'auto_rotate' | 'assign_team'
@@ -75,9 +89,13 @@ const conditionOperators = [
   { value: 'equals', label: 'Equals' },
   { value: 'not_equals', label: 'Not Equals' },
   { value: 'contains', label: 'Contains' },
+  { value: 'not_contains', label: 'Does not contain' },
   { value: 'gt', label: 'Greater Than' },
+  { value: 'gte', label: 'Greater or Equal' },
   { value: 'lt', label: 'Less Than' },
-  { value: 'in', label: 'In List' },
+  { value: 'lte', label: 'Less or Equal' },
+  { value: 'in', label: 'In List (comma-separated)' },
+  { value: 'not_in', label: 'Not In List' },
   { value: 'regex', label: 'Matches Regex' },
 ]
 
@@ -155,10 +173,23 @@ export default function PoliciesPage() {
   const [editingPolicy, setEditingPolicy] = useState<LocalPolicy | null>(null)
   const [isCreating, setIsCreating] = useState(false)
   const [loading, setLoading] = useState(true)
+  const [executions, setExecutions] = useState<PolicyExecution[]>([])
+  const [webhooks, setWebhooksState] = useState<PolicyWebhookConfig>({})
+  const [showWebhookModal, setShowWebhookModal] = useState(false)
+  const [testing, setTesting] = useState(false)
   const toast = useToast()
 
   useEffect(() => {
     loadPolicies()
+    setExecutions(getExecutions())
+    setWebhooksState(getPolicyWebhooks())
+
+    // Keep the recent-triggers panel fresh when a scan fires policies.
+    const refresh = () => setExecutions(getExecutions())
+    if (typeof window !== 'undefined') {
+      window.addEventListener('vaultsentry:policy-log-updated', refresh)
+      return () => window.removeEventListener('vaultsentry:policy-log-updated', refresh)
+    }
   }, [])
 
   // Persist policies to localStorage whenever they change
@@ -242,6 +273,66 @@ export default function PoliciesPage() {
     })
   }
 
+  /**
+   * Pull the current set of findings, run every enabled policy, and report
+   * what *would* fire right now. This is the main confidence-building tool
+   * for authors — no need to wait for a scan to validate a rule.
+   */
+  const testPoliciesAgainstFindings = async () => {
+    if (policies.filter((p) => p.enabled).length === 0) {
+      toast.info('Nothing to test', 'Enable at least one policy first.')
+      return
+    }
+    setTesting(true)
+    try {
+      const res = await fetch('/api/secrets', {
+        cache: 'no-store',
+        headers: getAuthHeaders(),
+      })
+      const findings: PolicyFinding[] = res.ok ? await res.json() : []
+      if (!Array.isArray(findings) || findings.length === 0) {
+        toast.info('No findings yet', 'Run a scan first so there is something to test against.')
+        return
+      }
+
+      const evalResult = evaluatePolicies(findings, policies as unknown as EnginePolicy[])
+      if (evalResult.matches.length === 0) {
+        toast.info(
+          'No policies match',
+          `${findings.length} finding${findings.length === 1 ? '' : 's'} checked — none satisfied the conditions.`,
+        )
+        return
+      }
+
+      // Actually execute so the user sees real side-effects (Slack, log).
+      await executeMatches(evalResult.matches, { webhooks })
+      setExecutions(getExecutions())
+
+      toast.success(
+        `${evalResult.matches.length} polic${evalResult.matches.length === 1 ? 'y' : 'ies'} would fire`,
+        `${evalResult.summary.uniqueFindingsMatched} of ${findings.length} findings matched.`,
+      )
+    } catch (err: any) {
+      console.error('[POLICIES] Test failed:', err)
+      toast.error('Test failed', err?.message || 'Could not evaluate policies')
+    } finally {
+      setTesting(false)
+    }
+  }
+
+  const saveWebhooks = (cfg: PolicyWebhookConfig) => {
+    setPolicyWebhooks(cfg)
+    setWebhooksState(cfg)
+    setShowWebhookModal(false)
+    toast.success('Integrations saved')
+  }
+
+  const clearTriggerLog = () => {
+    clearExecutions()
+    setExecutions([])
+    toast.success('Trigger history cleared')
+  }
+
   return (
     <div className="flex h-screen bg-[var(--bg-primary)]">
       <Sidebar isOpen={sidebarOpen} onToggle={() => setSidebarOpen(!sidebarOpen)} />
@@ -258,10 +349,25 @@ export default function PoliciesPage() {
                 Configure automated actions based on secret detection rules
               </p>
             </div>
-            <Button onClick={startCreate}>
-              <Plus className="w-4 h-4 mr-2" />
-              Create Policy
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="secondary"
+                onClick={testPoliciesAgainstFindings}
+                disabled={testing}
+                title="Evaluate all enabled policies against the latest findings"
+              >
+                <FlaskConical className="w-4 h-4 mr-2" />
+                {testing ? 'Testing…' : 'Test against findings'}
+              </Button>
+              <Button variant="secondary" onClick={() => setShowWebhookModal(true)}>
+                <SettingsIcon className="w-4 h-4 mr-2" />
+                Integrations
+              </Button>
+              <Button onClick={startCreate}>
+                <Plus className="w-4 h-4 mr-2" />
+                Create Policy
+              </Button>
+            </div>
           </div>
 
           {/* Search & Stats */}
@@ -442,6 +548,63 @@ export default function PoliciesPage() {
             })}
           </div>
 
+          {/* Recent Triggers */}
+          <div className="mt-8">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-sm font-semibold text-[var(--text-primary)] flex items-center gap-2">
+                <Activity className="w-4 h-4 text-[var(--accent)]" />
+                Recent policy triggers
+                <span className="text-xs font-normal text-[var(--text-muted)]">
+                  · last {Math.min(executions.length, 50)} of 50
+                </span>
+              </h2>
+              {executions.length > 0 && (
+                <button
+                  onClick={clearTriggerLog}
+                  className="text-xs text-[var(--text-muted)] hover:text-red-400 transition-colors"
+                >
+                  Clear history
+                </button>
+              )}
+            </div>
+            {executions.length === 0 ? (
+              <div className="card border border-[var(--border-color)] text-sm text-[var(--text-muted)] p-6 text-center">
+                No policy triggers yet. Policies fire automatically after each scan — or click <strong className="text-[var(--text-primary)]">Test against findings</strong> to try them on the current set.
+              </div>
+            ) : (
+              <div className="card border border-[var(--border-color)] divide-y divide-[var(--border-color)] p-0 overflow-hidden">
+                {executions.slice(0, 15).map((exec) => {
+                  const badge =
+                    exec.status === 'fired'
+                      ? { color: 'text-emerald-400', bg: 'bg-emerald-500/10', label: 'Fired' }
+                      : exec.status === 'skipped'
+                      ? { color: 'text-amber-400', bg: 'bg-amber-500/10', label: 'Skipped' }
+                      : { color: 'text-red-400', bg: 'bg-red-500/10', label: 'Failed' }
+                  const when = new Date(exec.timestamp)
+                  return (
+                    <div key={exec.id} className="flex items-center gap-3 px-4 py-3 text-sm">
+                      <span className={`px-2 py-0.5 rounded text-xs font-semibold ${badge.color} ${badge.bg}`}>
+                        {badge.label}
+                      </span>
+                      <span className="font-medium text-[var(--text-primary)] truncate max-w-[200px]">
+                        {exec.policyName}
+                      </span>
+                      <span className="text-xs text-[var(--text-muted)] whitespace-nowrap">
+                        → {exec.actionType}
+                      </span>
+                      <span className="text-xs text-[var(--text-muted)] truncate flex-1">
+                        {exec.message}
+                      </span>
+                      <span className="text-xs text-[var(--text-muted)] whitespace-nowrap">
+                        {when.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+
           {/* Empty State */}
           {!loading && filteredPolicies.length === 0 && (
             <div className="text-center py-16">
@@ -468,6 +631,92 @@ export default function PoliciesPage() {
           onCancel={() => { setEditingPolicy(null); setIsCreating(false); }}
         />
       )}
+
+      {/* Webhooks / Integrations Modal */}
+      {showWebhookModal && (
+        <WebhookSettings
+          initial={webhooks}
+          onSave={saveWebhooks}
+          onCancel={() => setShowWebhookModal(false)}
+        />
+      )}
+    </div>
+  )
+}
+
+interface WebhookSettingsProps {
+  initial: PolicyWebhookConfig
+  onSave: (cfg: PolicyWebhookConfig) => void
+  onCancel: () => void
+}
+
+function WebhookSettings({ initial, onSave, onCancel }: WebhookSettingsProps) {
+  const [slackWebhookUrl, setSlack] = useState(initial.slackWebhookUrl ?? '')
+  const [genericWebhookUrl, setGeneric] = useState(initial.genericWebhookUrl ?? '')
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div className="bg-[var(--bg-secondary)] rounded-xl max-w-xl w-full">
+        <div className="p-6 border-b border-[var(--border-color)]">
+          <h2 className="text-xl font-semibold text-[var(--text-primary)]">Policy integrations</h2>
+          <p className="text-sm text-[var(--text-muted)] mt-1">
+            Webhook URLs used by <code>slack_notify</code> and other actions. Stored locally in your
+            browser — never sent to our servers.
+          </p>
+        </div>
+
+        <div className="p-6 space-y-5">
+          <div>
+            <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">
+              Slack incoming webhook
+            </label>
+            <input
+              type="url"
+              placeholder="https://hooks.slack.com/services/…"
+              value={slackWebhookUrl}
+              onChange={(e) => setSlack(e.target.value)}
+              className="w-full px-3 py-2 bg-[var(--bg-tertiary)] border border-[var(--border-color)] rounded-lg text-sm text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent)] font-mono"
+            />
+            <p className="text-xs text-[var(--text-muted)] mt-1">
+              Used by policies with a <strong>Slack Notification</strong> action.
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">
+              Generic webhook (Jira, block PR, auto-rotate, assign team)
+            </label>
+            <input
+              type="url"
+              placeholder="https://your-automation.example.com/hook"
+              value={genericWebhookUrl}
+              onChange={(e) => setGeneric(e.target.value)}
+              className="w-full px-3 py-2 bg-[var(--bg-tertiary)] border border-[var(--border-color)] rounded-lg text-sm text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent)] font-mono"
+            />
+            <p className="text-xs text-[var(--text-muted)] mt-1">
+              Any action that doesn&apos;t have a first-class integration posts a JSON payload here.
+              Leave blank to record an intent instead.
+            </p>
+          </div>
+        </div>
+
+        <div className="p-6 border-t border-[var(--border-color)] flex justify-end gap-3">
+          <Button variant="secondary" onClick={onCancel}>
+            Cancel
+          </Button>
+          <Button
+            onClick={() =>
+              onSave({
+                slackWebhookUrl: slackWebhookUrl.trim() || undefined,
+                genericWebhookUrl: genericWebhookUrl.trim() || undefined,
+              })
+            }
+          >
+            <Save className="w-4 h-4 mr-2" />
+            Save
+          </Button>
+        </div>
+      </div>
     </div>
   )
 }

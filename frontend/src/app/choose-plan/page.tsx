@@ -11,10 +11,6 @@ import {
   Rocket,
   Shield,
   Sparkles,
-  Star,
-  Zap,
-  CreditCard,
-  X,
 } from 'lucide-react'
 
 interface Plan {
@@ -110,13 +106,11 @@ const PLANS: Plan[] = [
 
 export default function ChoosePlanPage() {
   const router = useRouter()
-  const { user, isAuthenticated, isLoading } = useAuth()
+  const { user, isAuthenticated, isLoading, updateProfile } = useAuth()
   const toast = useToast()
   const [selectedPlan, setSelectedPlan] = useState<string | null>(null)
   const [billingCycle, setBillingCycle] = useState<'monthly' | 'yearly'>('monthly')
   const [processing, setProcessing] = useState(false)
-  const [showPaymentModal, setShowPaymentModal] = useState(false)
-  const [paymentPlan, setPaymentPlan] = useState<Plan | null>(null)
 
   useEffect(() => {
     // Only redirect if fully loaded, authenticated, and NOT a new user
@@ -127,13 +121,29 @@ export default function ChoosePlanPage() {
   }, [isAuthenticated, isLoading, router])
 
   const handleSelectPlan = async (plan: Plan) => {
+    setSelectedPlan(plan.id)
     if (plan.tier === 'basic') {
-      // Free plan — activate immediately
+      // Free plan — activate basic tier immediately and route to dashboard.
+      // Feature limits (1 repo, 1 scan/week, etc.) apply automatically via
+      // SubscriptionContext reading user.subscription_tier.
       setProcessing(true)
       try {
-        // Mark user as onboarded
+        if (user) {
+          try {
+            await updateProfile({
+              subscription_tier: 'basic',
+              subscription_started_at: new Date().toISOString(),
+              is_trial: false,
+              trial_ends_at: null,
+            })
+          } catch (err) {
+            // Non-fatal: Supabase write can fail in demo mode / offline —
+            // user already defaults to 'basic' in AuthContext fetchUserProfile.
+            console.warn('Could not persist free-plan selection:', err)
+          }
+        }
         localStorage.removeItem('vs_new_user')
-        toast.success('Welcome to VaultSentry!', 'Your Starter plan is active. Start scanning!')
+        toast.success('Welcome to VaultSentry!', 'Your Starter plan is active — limited features unlocked.')
         router.push('/')
       } catch {
         toast.error('Something went wrong')
@@ -141,27 +151,14 @@ export default function ChoosePlanPage() {
         setProcessing(false)
       }
     } else {
-      // Paid plan — show payment modal
-      setPaymentPlan(plan)
-      setShowPaymentModal(true)
+      // Paid plan — redirect to the checkout gateway. The gateway handles
+      // payment, persists the upgraded tier, then bounces back to the dashboard.
+      const params = new URLSearchParams({
+        plan: plan.tier,
+        cycle: billingCycle,
+      })
+      router.push(`/checkout?${params.toString()}`)
     }
-  }
-
-  const handlePaymentSubmit = async () => {
-    if (!paymentPlan) return
-    setProcessing(true)
-    
-    // Simulate payment processing
-    await new Promise(resolve => setTimeout(resolve, 2000))
-    
-    toast.success(
-      'Subscription Activated!', 
-      `Your ${paymentPlan.name} plan is now active.`
-    )
-    localStorage.removeItem('vs_new_user')
-    setShowPaymentModal(false)
-    setProcessing(false)
-    router.push('/')
   }
 
   if (isLoading) {
@@ -333,102 +330,6 @@ export default function ChoosePlanPage() {
         </div>
       </div>
 
-      {/* Payment Gateway Modal */}
-      {showPaymentModal && paymentPlan && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
-          <div className="bg-slate-900 border border-gray-700 rounded-2xl shadow-2xl max-w-md w-full overflow-hidden">
-            {/* Modal header */}
-            <div className={`bg-gradient-to-r ${paymentPlan.gradient} p-6 flex items-center justify-between`}>
-              <div>
-                <h2 className="text-xl font-bold text-white">Subscribe to {paymentPlan.name}</h2>
-                <p className="text-sm text-white/70 mt-1">
-                  ${billingCycle === 'yearly' ? Math.round(paymentPlan.yearlyPrice / 12) : paymentPlan.price}/month
-                  {billingCycle === 'yearly' ? ` • $${paymentPlan.yearlyPrice}/year` : ''}
-                </p>
-              </div>
-              <button 
-                onClick={() => setShowPaymentModal(false)}
-                className="p-2 rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            {/* Payment form */}
-            <div className="p-6 space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-400 mb-1.5">Cardholder Name</label>
-                <input
-                  type="text"
-                  placeholder="John Doe"
-                  className="w-full px-4 py-2.5 rounded-lg bg-slate-800 border border-gray-700 text-white placeholder:text-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-400 mb-1.5">Card Number</label>
-                <div className="relative">
-                  <input
-                    type="text"
-                    placeholder="4242 4242 4242 4242"
-                    maxLength={19}
-                    className="w-full px-4 py-2.5 rounded-lg bg-slate-800 border border-gray-700 text-white placeholder:text-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500/50 pr-12"
-                  />
-                  <CreditCard className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-600" />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-400 mb-1.5">Expiry</label>
-                  <input
-                    type="text"
-                    placeholder="MM/YY"
-                    maxLength={5}
-                    className="w-full px-4 py-2.5 rounded-lg bg-slate-800 border border-gray-700 text-white placeholder:text-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-400 mb-1.5">CVV</label>
-                  <input
-                    type="text"
-                    placeholder="123"
-                    maxLength={4}
-                    className="w-full px-4 py-2.5 rounded-lg bg-slate-800 border border-gray-700 text-white placeholder:text-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
-                  />
-                </div>
-              </div>
-
-              <div className="mt-2 p-3 rounded-lg bg-amber-500/10 border border-amber-500/20">
-                <p className="text-xs text-amber-400 flex items-center gap-2">
-                  <Star className="w-4 h-4 flex-shrink-0" />
-                  This is a demo payment gateway. No real charges will be made.
-                </p>
-              </div>
-
-              <button
-                onClick={handlePaymentSubmit}
-                disabled={processing}
-                className={`w-full py-3 px-4 rounded-xl font-semibold text-white bg-gradient-to-r ${paymentPlan.buttonGradient} hover:opacity-90 transition-all shadow-lg flex items-center justify-center gap-2 mt-4 disabled:opacity-50`}
-              >
-                {processing ? (
-                  <>
-                    <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                    Processing...
-                  </>
-                ) : (
-                  <>
-                    <Zap className="w-5 h-5" />
-                    Pay ${billingCycle === 'yearly' ? paymentPlan.yearlyPrice : paymentPlan.price * 12}/{billingCycle === 'yearly' ? 'year' : 'year'}
-                  </>
-                )}
-              </button>
-
-              <p className="text-center text-xs text-gray-600 mt-2">
-                🔒 Secured with 256-bit SSL encryption
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   )
 }

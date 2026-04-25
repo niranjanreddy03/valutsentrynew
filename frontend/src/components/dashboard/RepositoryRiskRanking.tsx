@@ -51,11 +51,11 @@ export default function RepositoryRiskRanking({ repositories, loading }: Reposit
 
   if (loading) {
     return (
-      <div className="dashboard-card max-h-[260px] animate-pulse">
+      <div className="dashboard-card animate-pulse overflow-hidden">
         <div className="flex items-center justify-between mb-4">
           <div className="h-5 w-28 skeleton" />
         </div>
-        <div className="space-y-2 overflow-y-auto max-h-[160px]">
+        <div className="space-y-2">
           {[1, 2, 3, 4, 5].map(i => (
             <div key={i} className="h-12 skeleton rounded-lg" />
           ))}
@@ -65,7 +65,7 @@ export default function RepositoryRiskRanking({ repositories, loading }: Reposit
   }
 
   return (
-    <div className="dashboard-card max-h-[260px] flex flex-col">
+    <div className="dashboard-card flex flex-col overflow-hidden">
       <div className="flex items-center justify-between mb-4 flex-shrink-0">
         <div>
           <h3 className="text-base font-semibold text-[var(--text-primary)] flex items-center gap-2">
@@ -76,7 +76,7 @@ export default function RepositoryRiskRanking({ repositories, loading }: Reposit
         </div>
       </div>
 
-      <div className="space-y-2 overflow-y-auto flex-1 pr-1 scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent">
+      <div className="space-y-2">
         {repositories.slice(0, 5).map((repo, index) => {
           const riskLabel = getRiskLabel(repo.risk_score)
           

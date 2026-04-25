@@ -1,169 +1,342 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect, FormEvent } from 'react'
+import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { Mail, Loader2, ArrowLeft, CheckCircle, Moon, Sun, KeyRound } from 'lucide-react'
-import { useToast } from '@/contexts/ToastContext'
-import { useTheme } from '@/contexts/ThemeContext'
+import { Mail, Lock, ArrowLeft, CheckCircle2, KeyRound, AlertCircle } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
+import { useToast } from '@/contexts/ToastContext'
+import {
+  AuthLayout,
+  AuthCard,
+  AuthInput,
+  AuthButton,
+  OtpInput,
+  PasswordStrength,
+  scoreOf,
+  Stepper,
+  StepFade,
+  Turnstile,
+} from '@/components/auth'
+
+type Step = 'email' | 'otp' | 'reset' | 'done'
+const STEPS = ['Email', 'Code', 'New password']
 
 export default function ForgotPasswordPage() {
+  const router = useRouter()
+  const { forgotPassword, verifyOtp, resendOtp, resetPassword } = useAuth()
+  const { showToast } = useToast()
+
+  const [step, setStep] = useState<Step>('email')
   const [email, setEmail] = useState('')
-  const [isLoading, setIsLoading] = useState(false)
-  const [isSubmitted, setIsSubmitted] = useState(false)
-  const [error, setError] = useState('')
-  const toast = useToast()
-  const { theme, toggleTheme } = useTheme()
-  const { forgotPassword } = useAuth()
+  const [otp, setOtp] = useState('')
+  const [password, setPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [shake, setShake] = useState(false)
+  const [resendCooldown, setResendCooldown] = useState(0)
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null)
+  const [captchaNonce, setCaptchaNonce] = useState(0)
+  const captchaEnabled = !!process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY
 
-  const validate = () => {
-    if (!email) {
-      setError('Email is required')
-      return false
-    }
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      setError('Invalid email format')
-      return false
-    }
-    setError('')
-    return true
+  useEffect(() => {
+    if (resendCooldown <= 0) return
+    const t = setTimeout(() => setResendCooldown((c) => c - 1), 1000)
+    return () => clearTimeout(t)
+  }, [resendCooldown])
+
+  const currentIndex = step === 'email' ? 0 : step === 'otp' ? 1 : 2
+  const passwordsMatch = password.length > 0 && password === confirmPassword
+
+  const triggerShake = () => {
+    setShake(true)
+    setTimeout(() => setShake(false), 500)
   }
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleEmailSubmit = async (e: FormEvent) => {
     e.preventDefault()
-    if (!validate()) return
-
-    setIsLoading(true)
+    setError(null)
+    if (!email) {
+      setError('Please enter your email.')
+      triggerShake()
+      return
+    }
+    if (captchaEnabled && !captchaToken) {
+      setError('Please complete the captcha.')
+      triggerShake()
+      return
+    }
+    setLoading(true)
     try {
-      await forgotPassword(email)
-      setIsSubmitted(true)
-      toast.success('Email sent!', 'Check your inbox for reset instructions.')
+      await forgotPassword(email, captchaToken ?? undefined)
+      setStep('otp')
+      setResendCooldown(30)
+      showToast('Check your inbox for a reset code', 'success')
     } catch (err: any) {
-      toast.error('Failed to send email', err.message || 'Please try again')
+      setError(err?.message || 'Unable to send reset email.')
+      triggerShake()
+      setCaptchaToken(null)
+      setCaptchaNonce((n) => n + 1)
     } finally {
-      setIsLoading(false)
+      setLoading(false)
     }
   }
+
+  const handleOtpSubmit = async (code?: string) => {
+    const value = code ?? otp
+    if (value.length !== 6) return
+    setError(null)
+    setLoading(true)
+    try {
+      await verifyOtp(email, value, 'recovery')
+      setStep('reset')
+    } catch (err: any) {
+      setError(err?.message || 'Invalid or expired code.')
+      setOtp('')
+      triggerShake()
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleResend = async () => {
+    if (resendCooldown > 0) return
+    try {
+      await resendOtp(email, 'recovery')
+      setResendCooldown(30)
+      showToast('New code sent', 'success')
+    } catch (err: any) {
+      showToast(err?.message || 'Failed to resend code', 'error')
+    }
+  }
+
+  const handleResetSubmit = async (e: FormEvent) => {
+    e.preventDefault()
+    setError(null)
+    if (scoreOf(password) < 3) {
+      setError('Please choose a stronger password.')
+      triggerShake()
+      return
+    }
+    if (!passwordsMatch) {
+      setError('Passwords don’t match.')
+      triggerShake()
+      return
+    }
+    setLoading(true)
+    try {
+      await resetPassword(password)
+      setStep('done')
+      setTimeout(() => router.push('/login'), 1800)
+    } catch (err: any) {
+      setError(err?.message || 'Unable to reset password.')
+      triggerShake()
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const errorBanner = (msg: string) => (
+    <div
+      role="alert"
+      className="flex items-start gap-2 rounded-xl px-3 py-2.5 text-xs"
+      style={{
+        border: '1px solid rgba(239, 68, 68, 0.3)',
+        background: 'rgba(239, 68, 68, 0.08)',
+        color: '#fca5a5',
+      }}
+    >
+      <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+      <span>{msg}</span>
+    </div>
+  )
 
   return (
-    <div className="min-h-screen bg-zinc-100 dark:bg-zinc-950">
-      {/* Theme Toggle */}
-      <button
-        onClick={toggleTheme}
-        className="fixed top-4 right-4 z-50 p-2.5 rounded-lg bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors shadow-sm"
-        title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+    <AuthLayout>
+      <AuthCard
+        title={
+          step === 'email'
+            ? 'Reset your password'
+            : step === 'otp'
+            ? 'Enter your code'
+            : step === 'reset'
+            ? 'Choose a new password'
+            : 'Password updated'
+        }
+        subtitle={
+          step === 'email' ? (
+            'Enter your email and we’ll send a 6-digit code to reset it.'
+          ) : step === 'otp' ? (
+            <>
+              We sent a 6-digit code to <span style={{ color: '#fafafa' }}>{email}</span>
+            </>
+          ) : step === 'reset' ? (
+            'Pick something strong — you won’t need to do this often.'
+          ) : (
+            'Redirecting you to sign in…'
+          )
+        }
+        shake={shake}
+        footer={
+          step === 'email' ? (
+            <>
+              Remember it?{' '}
+              <Link
+                href="/login"
+                className="font-medium"
+                style={{ color: '#60a5fa' }}
+              >
+                Back to sign in
+              </Link>
+            </>
+          ) : step === 'otp' ? (
+            <>
+              Didn’t get it?{' '}
+              <button
+                type="button"
+                onClick={handleResend}
+                disabled={resendCooldown > 0}
+                className="font-medium disabled:opacity-60"
+                style={{ color: resendCooldown > 0 ? '#a3a3a3' : '#60a5fa' }}
+              >
+                {resendCooldown > 0 ? `Resend in ${resendCooldown}s` : 'Resend code'}
+              </button>
+            </>
+          ) : null
+        }
       >
-        {theme === 'dark' ? (
-          <Sun className="w-4 h-4 text-zinc-400" />
-        ) : (
-          <Moon className="w-4 h-4 text-zinc-600" />
+        {step !== 'done' && (
+          <div className="mb-7">
+            <Stepper steps={STEPS} current={currentIndex} />
+          </div>
         )}
-      </button>
 
-      {/* Content */}
-      <div className="min-h-screen flex items-center justify-center p-4">
-        <div className="w-full max-w-md">
-          {/* Logo */}
-          <div className="text-center mb-8">
-            <div className="inline-flex items-center justify-center w-14 h-14 rounded-xl bg-zinc-900 dark:bg-white mb-4">
-              <KeyRound className="w-7 h-7 text-white dark:text-zinc-900" />
+        <StepFade stepKey={step}>
+          {step === 'email' && (
+            <form onSubmit={handleEmailSubmit} className="space-y-4" noValidate>
+              <AuthInput
+                name="email"
+                type="email"
+                label="Email address"
+                icon={<Mail className="h-4 w-4" />}
+                autoComplete="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+              />
+              {captchaEnabled && (
+                <Turnstile
+                  resetKey={captchaNonce}
+                  onVerify={(t) => setCaptchaToken(t)}
+                  onExpire={() => setCaptchaToken(null)}
+                  onError={() => setCaptchaToken(null)}
+                />
+              )}
+              {error && errorBanner(error)}
+              <AuthButton
+                type="submit"
+                loading={loading}
+                disabled={!email || loading || (captchaEnabled && !captchaToken)}
+                leadingIcon={<KeyRound className="h-4 w-4" />}
+              >
+                Send reset code
+              </AuthButton>
+              <Link
+                href="/login"
+                className="inline-flex items-center gap-1.5 text-xs transition-colors" style={{ color: '#a3a3a3' }}
+              >
+                <ArrowLeft className="h-3.5 w-3.5" /> Back to sign in
+              </Link>
+            </form>
+          )}
+
+          {step === 'otp' && (
+            <div className="space-y-5">
+              <OtpInput
+                value={otp}
+                onChange={setOtp}
+                onComplete={(code) => handleOtpSubmit(code)}
+                error={!!error}
+                disabled={loading}
+              />
+              {error && errorBanner(error)}
+              <AuthButton
+                type="button"
+                loading={loading}
+                disabled={otp.length !== 6}
+                onClick={() => handleOtpSubmit()}
+              >
+                Verify code
+              </AuthButton>
+              <button
+                type="button"
+                onClick={() => {
+                  setStep('email')
+                  setOtp('')
+                  setError(null)
+                }}
+                className="inline-flex items-center gap-1.5 text-xs transition-colors" style={{ color: '#a3a3a3' }}
+              >
+                <ArrowLeft className="h-3.5 w-3.5" /> Use a different email
+              </button>
             </div>
-            <h1 className="text-2xl font-semibold text-zinc-900 dark:text-white mb-1">
-              {isSubmitted ? 'Check your email' : 'Reset your password'}
-            </h1>
-            <p className="text-zinc-500 dark:text-zinc-400">
-              {isSubmitted 
-                ? 'We\'ve sent you a password reset link' 
-                : 'Enter your email and we\'ll send you a reset link'}
-            </p>
-          </div>
+          )}
 
-          {/* Form Card */}
-          <div className="bg-white dark:bg-zinc-900 rounded-xl p-6 sm:p-8 border border-zinc-200 dark:border-zinc-800 shadow-sm">
-            {!isSubmitted ? (
-              <form onSubmit={handleSubmit} className="space-y-5">
-                <div>
-                  <label htmlFor="email" className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-2">
-                    Email address
-                  </label>
-                  <div className="relative">
-                    <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-zinc-400" />
-                    <input
-                      id="email"
-                      type="email"
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      placeholder="you@example.com"
-                      className={`
-                        w-full pl-11 pr-4 py-3 bg-zinc-50 dark:bg-zinc-800 border rounded-lg 
-                        text-zinc-900 dark:text-white placeholder-zinc-400 dark:placeholder-zinc-500
-                        focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-white focus:border-transparent
-                        transition-all
-                        ${error ? 'border-red-500' : 'border-zinc-200 dark:border-zinc-700'}
-                      `}
-                    />
-                  </div>
-                  {error && <p className="mt-2 text-sm text-red-500">{error}</p>}
-                </div>
+          {step === 'reset' && (
+            <form onSubmit={handleResetSubmit} className="space-y-4" noValidate>
+              <AuthInput
+                name="password"
+                type="password"
+                label="New password"
+                icon={<Lock className="h-4 w-4" />}
+                autoComplete="new-password"
+                togglePassword
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+              />
+              <PasswordStrength password={password} />
+              <AuthInput
+                name="confirmPassword"
+                type="password"
+                label="Confirm new password"
+                icon={<Lock className="h-4 w-4" />}
+                autoComplete="new-password"
+                togglePassword
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                required
+                error={
+                  confirmPassword.length > 0 && !passwordsMatch
+                    ? 'Passwords don’t match'
+                    : undefined
+                }
+              />
+              {error && errorBanner(error)}
+              <AuthButton
+                type="submit"
+                loading={loading}
+                disabled={scoreOf(password) < 3 || !passwordsMatch}
+              >
+                Update password
+              </AuthButton>
+            </form>
+          )}
 
-                <button
-                  type="submit"
-                  disabled={isLoading}
-                  className="
-                    w-full py-3 px-4 rounded-lg font-medium
-                    bg-zinc-900 dark:bg-white text-white dark:text-zinc-900
-                    hover:bg-zinc-800 dark:hover:bg-zinc-100
-                    focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-zinc-900 dark:focus:ring-white
-                    disabled:opacity-50 disabled:cursor-not-allowed
-                    transition-colors flex items-center justify-center gap-2
-                  "
-                >
-                  {isLoading ? (
-                    <>
-                      <Loader2 className="w-5 h-5 animate-spin" />
-                      Sending...
-                    </>
-                  ) : (
-                    'Send reset link'
-                  )}
-                </button>
-              </form>
-            ) : (
-              <div className="text-center py-4">
-                <div className="w-16 h-16 rounded-full bg-green-100 dark:bg-green-900/30 flex items-center justify-center mx-auto mb-6">
-                  <CheckCircle className="w-8 h-8 text-green-600 dark:text-green-400" />
-                </div>
-                <p className="text-zinc-600 dark:text-zinc-400 mb-4">
-                  We&apos;ve sent a password reset link to
-                </p>
-                <p className="text-zinc-900 dark:text-white font-medium mb-6">
-                  {email}
-                </p>
-                <div className="p-4 bg-zinc-50 dark:bg-zinc-800 rounded-lg border border-zinc-200 dark:border-zinc-700">
-                  <p className="text-sm text-zinc-500 dark:text-zinc-400">
-                    Didn&apos;t receive the email? Check your spam folder or{' '}
-                    <button
-                      onClick={() => setIsSubmitted(false)}
-                      className="text-zinc-900 dark:text-white font-medium hover:underline"
-                    >
-                      try again
-                    </button>
-                  </p>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Back to Login */}
-          <Link
-            href="/login"
-            className="flex items-center justify-center gap-2 mt-6 text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white transition-colors"
-          >
-            <ArrowLeft className="w-4 h-4" />
-            Back to sign in
-          </Link>
-        </div>
-      </div>
-    </div>
+          {step === 'done' && (
+            <div className="flex flex-col items-center py-6 text-center">
+              <span
+                className="flex h-14 w-14 items-center justify-center rounded-full shadow-[0_0_24px_rgba(16,185,129,0.25)]"
+                style={{ background: 'rgba(16, 185, 129, 0.15)', color: '#34d399' }}
+              >
+                <CheckCircle2 className="h-7 w-7" />
+              </span>
+              <p className="mt-4 text-sm" style={{ color: '#e5e5e5' }}>Your password has been updated.</p>
+            </div>
+          )}
+        </StepFade>
+      </AuthCard>
+    </AuthLayout>
   )
 }

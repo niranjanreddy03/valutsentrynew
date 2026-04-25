@@ -179,7 +179,18 @@ export interface Integration {
 // Policy types
 export interface PolicyCondition {
   field: string
-  operator: 'equals' | 'not_equals' | 'contains' | 'gt' | 'gte' | 'lt' | 'lte' | 'regex' | 'in' | 'not_in'
+  operator:
+    | 'equals'
+    | 'not_equals'
+    | 'contains'
+    | 'not_contains'
+    | 'gt'
+    | 'gte'
+    | 'lt'
+    | 'lte'
+    | 'regex'
+    | 'in'
+    | 'not_in'
   value: any
 }
 

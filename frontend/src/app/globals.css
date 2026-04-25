@@ -11,9 +11,9 @@
   --bg-tertiary: #f1f5f9;
   --bg-glass: rgba(255, 255, 255, 0.85);
   --bg-gradient: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 50%, #f1f5f9 100%);
-  --text-primary: #0f172a;
-  --text-secondary: #334155;
-  --text-muted: #64748b;
+  --text-primary: #020617;
+  --text-secondary: #1e293b;
+  --text-muted: #475569;
   --border-color: #e2e8f0;
   --border-hover: #cbd5e1;
   --border-glass: rgba(148, 163, 184, 0.2);
@@ -54,7 +54,30 @@
   --glow-info: rgba(59, 130, 246, 0.25);
 }
 
+/*
+ * Smooth-scroll was previously set globally on <html>, which made Chrome/Edge
+ * animate mouse-wheel scrolling too — the page kept gliding after the wheel
+ * stopped, which users perceived as "the page keeps scrolling by itself" on
+ * long pages like the dashboard / integrations. Using `auto` restores native
+ * wheel feel. Landing-page anchor jumps (#features, #how, #pricing) are
+ * re-enabled on that route only via `.smooth-anchors` below.
+ */
 html {
+  scroll-behavior: auto;
+  overscroll-behavior-y: none;
+  height: 100%;
+}
+
+/* Body baseline: match viewport height so pages with a `h-screen overflow-hidden`
+   root don't cause a second scrollbar from body overflow. Marketing / landing
+   pages opt into body scroll by using `min-h-screen` on their own wrappers. */
+body {
+  min-height: 100%;
+}
+
+/* Opt-in smooth scrolling — add `className="smooth-anchors"` on a page
+   wrapper (e.g. the marketing landing page) to restore animated anchor jumps. */
+.smooth-anchors {
   scroll-behavior: smooth;
 }
 
@@ -104,6 +127,15 @@ html:not(.dark)::before {
     linear-gradient(rgba(59, 130, 246, 0.03) 1px, transparent 1px),
     linear-gradient(90deg, rgba(59, 130, 246, 0.03) 1px, transparent 1px);
   background-size: 50px 50px;
+}
+
+/* Any element using Tailwind `overflow-y-auto` inside a fixed-height layout
+   (dashboard etc.) shouldn't chain-scroll into body when it hits the edge —
+   that chain-scroll is what makes the page feel like it "keeps going". */
+.overflow-y-auto,
+.overflow-y-scroll,
+main {
+  overscroll-behavior-y: contain;
 }
 
 /* Scrollbar styling */
@@ -962,4 +994,59 @@ html:not(.dark) .integration-card:hover {
 html:not(.dark) ::selection {
   background: rgba(37, 99, 235, 0.2);
   color: #0f172a;
+}
+
+/* ========================================
+   LIGHT MODE TEXT CONTRAST BOOST
+   Darkens low-contrast Tailwind grays that were designed for dark mode
+   so body copy and secondary text become readable on light backgrounds.
+   ======================================== */
+html:not(.dark) .text-gray-300,
+html:not(.dark) .text-gray-400,
+html:not(.dark) .text-slate-300,
+html:not(.dark) .text-slate-400,
+html:not(.dark) .text-neutral-300,
+html:not(.dark) .text-neutral-400,
+html:not(.dark) .text-zinc-300,
+html:not(.dark) .text-zinc-400 {
+  color: #334155 !important;
+}
+
+html:not(.dark) .text-gray-500,
+html:not(.dark) .text-slate-500,
+html:not(.dark) .text-neutral-500,
+html:not(.dark) .text-zinc-500 {
+  color: #1e293b !important;
+}
+
+html:not(.dark) .text-gray-600,
+html:not(.dark) .text-slate-600,
+html:not(.dark) .text-neutral-600,
+html:not(.dark) .text-zinc-600 {
+  color: #0f172a !important;
+}
+
+html:not(.dark) .text-white {
+  /* Keep white text on clearly colored/gradient buttons — only neutralize
+     when the parent is a plain/light surface. Buttons use .btn-* which sets
+     its own color, so this override only hits stray light-on-light text. */
+}
+
+/* Placeholder contrast */
+html:not(.dark) ::placeholder,
+html:not(.dark) .input::placeholder {
+  color: #64748b !important;
+  opacity: 1;
+}
+
+/* Labels and small helper text */
+html:not(.dark) label,
+html:not(.dark) .text-muted,
+html:not(.dark) small {
+  color: #334155;
+}
+
+/* Links default to clearly readable blue in light mode */
+html:not(.dark) a:not(.btn):not(.btn-primary):not(.btn-secondary):not(.btn-ghost):not(.btn-danger):not(.btn-success) {
+  color: #1d4ed8;
 }

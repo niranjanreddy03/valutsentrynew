@@ -25,13 +25,21 @@ const MAX_FILE_SIZE = 2 * 1024 * 1024;
 /** Binary file extensions that should be skipped */
 const BINARY_EXTENSIONS = new Set([
   '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.ico', '.svg',
-  '.mp4', '.mp3', '.avi', '.mov', '.mkv', '.wav', '.ogg',
-  '.zip', '.tar', '.gz', '.rar', '.7z', '.bz2',
-  '.exe', '.dll', '.so', '.dylib', '.bin', '.dat', '.db', '.sqlite',
+  '.mp4', '.mp3', '.avi', '.mov', '.mkv', '.wav', '.ogg', '.flac', '.m4a',
+  '.zip', '.tar', '.gz', '.rar', '.7z', '.bz2', '.xz', '.tgz',
+  '.exe', '.dll', '.so', '.dylib', '.bin', '.dat', '.db', '.sqlite', '.sqlite3',
   '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx',
   '.ttf', '.otf', '.woff', '.woff2', '.eot',
-  '.pyc', '.class', '.o', '.obj',
+  '.pyc', '.class', '.o', '.obj', '.a', '.lib',
   '.lock',  // Lockfiles are large and rarely contain secrets directly
+  '.min.js', '.min.css', '.map',  // Minified assets / source maps
+]);
+
+/** Filenames that are large and rarely contain unhashed secrets.
+ *  Skipping these by basename (no stat needed) saves serious I/O on big repos. */
+const SKIP_BASENAMES = new Set([
+  'package-lock.json', 'yarn.lock', 'pnpm-lock.yaml', 'npm-shrinkwrap.json',
+  'composer.lock', 'Gemfile.lock', 'poetry.lock', 'Cargo.lock', 'go.sum',
 ]);
 
 /** Directory names to always skip */
@@ -94,7 +102,18 @@ function isTestFile(filePath) {
  * @returns {{ skip: boolean, reason?: string }}
  */
 function shouldSkipFile(filePath, fileSize = -1) {
-  const ext = path.extname(filePath).toLowerCase();
+  const base = path.basename(filePath);
+  if (SKIP_BASENAMES.has(base)) {
+    return { skip: true, reason: `skipped lockfile (${base})` };
+  }
+
+  const lower = base.toLowerCase();
+  const ext = path.extname(lower);
+
+  // Handle compound extensions like .min.js / .min.css before the simple check.
+  if (lower.endsWith('.min.js') || lower.endsWith('.min.css') || lower.endsWith('.map')) {
+    return { skip: true, reason: `generated asset` };
+  }
 
   if (BINARY_EXTENSIONS.has(ext)) {
     return { skip: true, reason: `binary extension (${ext})` };
@@ -193,6 +212,25 @@ async function scanFile(filePath, options = {}) {
   const displayPath = basePath ? path.relative(basePath, filePath) : filePath;
   const testFile = isTestFile(filePath);
 
+  // ── Precompute line-start offsets (one linear pass) so we can resolve
+  //    a match's line number in O(log n) instead of O(fileSize) per match.
+  //    Huge win for files with lots of matches: old code sliced + split on
+  //    the entire prefix for every single match.
+  const lineStarts = [0];
+  for (let i = 0; i < content.length; i++) {
+    if (content.charCodeAt(i) === 10 /* '\n' */) lineStarts.push(i + 1);
+  }
+  const lineNumberAt = (offset) => {
+    // Binary search for the largest lineStart <= offset.
+    let lo = 0, hi = lineStarts.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >>> 1;
+      if (lineStarts[mid] <= offset) lo = mid;
+      else hi = mid - 1;
+    }
+    return lo + 1; // 1-based
+  };
+
   // ── Deduplication set (within this file) ──
   const seenHashes = new Set();
 
@@ -218,9 +256,8 @@ async function scanFile(filePath, options = {}) {
       if (seenHashes.has(dedupKey)) continue;
       seenHashes.add(dedupKey);
 
-      // ── Line number (1-based) ──
-      const textBefore = content.slice(0, match.index);
-      const lineNumber = textBefore.split('\n').length;
+      // ── Line number (1-based) — O(log n) lookup ──
+      const lineNumber = lineNumberAt(match.index);
 
       // ── Snippet — line above, the match line, line below ──
       const snippetStart = Math.max(0, lineNumber - 2);

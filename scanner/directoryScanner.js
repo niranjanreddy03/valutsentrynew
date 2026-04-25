@@ -16,7 +16,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { scanFile, shouldExcludeDir } = require('./scanner');
+const { scanFile, shouldExcludeDir, shouldSkipFile } = require('./scanner');
 const logger = require('./logger');
 
 // ─── Optional .gitignore support ──────────────────────────────────────────────
@@ -126,6 +126,11 @@ async function collectFiles(rootDir, ig) {
           logger.debug(`Excluded dir: ${entry.name}`);
         }
       } else if (entry.isFile()) {
+        // Pre-filter by extension/basename BEFORE adding — avoids a later
+        // stat + read for obviously-skippable files (lockfiles, binaries,
+        // minified bundles). Big win on JS/TS monorepos.
+        const pre = shouldSkipFile(fullPath, -1);
+        if (pre.skip) continue;
         files.push(fullPath);
       }
     }
@@ -175,7 +180,9 @@ async function scanDirectory(rootDir, opts = {}) {
     maskValues = true,
     includeRawValue = false,
     useGitignore = true,
-    concurrency = 10,
+    // Higher default — file scanning is I/O-bound so extra parallelism helps
+    // dramatically on SSDs / NVMe without starving the CPU.
+    concurrency = 24,
     onProgress = null,
   } = opts;
 
@@ -257,6 +264,15 @@ async function scanDirectory(rootDir, opts = {}) {
     return a.file.localeCompare(b.file);
   });
 
+  // Single pass severity tally (was 4 separate filter passes).
+  let critical = 0, high = 0, medium = 0, low = 0;
+  for (const f of findings) {
+    if (f.severity === 'critical') critical++;
+    else if (f.severity === 'high') high++;
+    else if (f.severity === 'medium') medium++;
+    else if (f.severity === 'low') low++;
+  }
+
   // ── Build summary ──
   const completedAt = new Date().toISOString();
   const durationMs = Date.now() - startTime;
@@ -267,10 +283,10 @@ async function scanDirectory(rootDir, opts = {}) {
     filesScanned: scannedCount,
     filesSkipped,
     totalIssues: findings.length,
-    critical: findings.filter((f) => f.severity === 'critical').length,
-    high:     findings.filter((f) => f.severity === 'high').length,
-    medium:   findings.filter((f) => f.severity === 'medium').length,
-    low:      findings.filter((f) => f.severity === 'low').length,
+    critical,
+    high,
+    medium,
+    low,
     durationMs,
     startedAt,
     completedAt,

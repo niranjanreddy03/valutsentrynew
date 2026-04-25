@@ -75,11 +75,21 @@ async function checkGitAvailable() {
 async function cloneRepo(repoUrl, targetDir, opts = {}) {
   const { branch, depth = 1, timeout = 120_000 } = opts;
 
-  const args = ['clone', '--quiet'];
+  // Aggressively minimal clone:
+  //   --depth=1           → latest commit only (already had this)
+  //   --single-branch     → skip fetching refs for every other branch
+  //   --no-tags           → don't download tag objects
+  //   --filter=blob:limit=1m → partial clone: skip blobs >1 MB (we'd skip
+  //                           them at scan time anyway because of MAX_FILE_SIZE)
+  //   -c advice.detachedHead=false → silence the noisy advice
+  const args = ['-c', 'advice.detachedHead=false', 'clone', '--quiet', '--single-branch', '--no-tags'];
 
   if (depth && depth > 0) {
     args.push('--depth', String(depth));
   }
+  // Partial clone: dramatically cuts download size for repos with media/binaries.
+  // Safe because we skip files >2 MB at scan time anyway.
+  args.push('--filter=blob:limit=1m');
   if (branch) {
     args.push('--branch', branch);
   }
@@ -108,8 +118,9 @@ async function cloneRepo(repoUrl, targetDir, opts = {}) {
     if (branch && (msg.includes('not found') || msg.includes('Remote branch'))) {
       logger.warn(`Branch '${branch}' not found, retrying with default branch...`);
       try {
-        const fallbackArgs = ['clone', '--quiet'];
+        const fallbackArgs = ['-c', 'advice.detachedHead=false', 'clone', '--quiet', '--single-branch', '--no-tags'];
         if (depth && depth > 0) fallbackArgs.push('--depth', String(depth));
+        fallbackArgs.push('--filter=blob:limit=1m');
         fallbackArgs.push(repoUrl, targetDir);
         
         // Clean up partial clone

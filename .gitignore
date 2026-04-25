@@ -65,3 +65,5 @@ scanner/data/store.json
 
 # Gemini/AI tool data
 .gemini/
+
+.claude/

@@ -8,8 +8,11 @@ import { DEMO_REPOSITORIES, isDemoMode } from '@/lib/demoData'
 import type { Repository } from '@/lib/supabase/types'
 import { repositoryService } from '@/services/supabase'
 import { getAuthHeaders } from '@/lib/authHeaders'
+import { waitForScanCompletion } from '@/lib/pollScan'
+import { runPoliciesForScan } from '@/lib/runPoliciesForScan'
 import {
     ExternalLink,
+    FileDown,
     Filter,
     GitBranch,
     Github,
@@ -21,6 +24,7 @@ import {
     Trash2
 } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useRouter } from 'next/navigation'
 
 const providerIcons: Record<string, React.ReactNode> = {
   github: <Github className="w-5 h-5" />,
@@ -48,6 +52,7 @@ export default function RepositoriesPage() {
   const [urlError, setUrlError] = useState<string | null>(null)
   const demoReposLoadedRef = useRef(false)
   const toast = useToast()
+  const router = useRouter()
 
   // New repository form
   const [newRepo, setNewRepo] = useState<{
@@ -129,35 +134,61 @@ export default function RepositoriesPage() {
 
   const fetchRepositories = useCallback(async () => {
     try {
-      // Try loading persisted repos from backend first
-      try {
-        const response = await fetch('/api/repositories', { headers: getAuthHeaders() })
-        if (response.ok) {
-          const backendRepos = await response.json()
-          if (backendRepos && backendRepos.length > 0) {
-            console.log(`[REPOS] Loaded ${backendRepos.length} repos from backend`)
-            setRepositories(backendRepos as Repository[])
-            setLoading(false)
-            return
-          }
-        }
-      } catch (err) {
-        console.log('[REPOS] Backend not available, using local data')
-      }
-
-      // Fallback: demo or Supabase
+      // Demo mode: seed with the demo list once.
       if (isDemoMode()) {
         if (!demoReposLoadedRef.current) {
           setRepositories(DEMO_REPOSITORIES as unknown as Repository[])
           demoReposLoadedRef.current = true
         }
-        setLoading(false)
         return
       }
 
+      // Supabase is the source of truth — RLS scopes rows to the signed-in user,
+      // so each account only sees its own repos and they persist across sessions.
       const data = await repositoryService.getAll()
-      setRepositories(data)
+
+      // Overlay the most recent scan result from the scanner so the cards
+      // reflect real secret counts even when the scanner wrote to its own
+      // store (not Supabase). Best-effort — ignore if the scanner is offline.
+      try {
+        const scansRes = await fetch('/api/scans', {
+          cache: 'no-store',
+          headers: getAuthHeaders(),
+        })
+        if (scansRes.ok) {
+          const scans = (await scansRes.json()) as any[]
+          const enriched = data.map((r: Repository) => {
+            // Match by URL (scanner stores its own repo id, which won't
+            // equal the Supabase id).
+            const repoScans = scans
+              .filter(
+                (s) =>
+                  s.repository_url &&
+                  s.repository_url.replace(/\.git$/, '') ===
+                    (r.url || '').replace(/\.git$/, ''),
+              )
+              .sort(
+                (a, b) =>
+                  new Date(b.created_at).getTime() -
+                  new Date(a.created_at).getTime(),
+              )
+            const latest = repoScans.find((s) => s.status === 'completed')
+            if (!latest) return r
+            return {
+              ...r,
+              secrets_count: latest.secrets_found ?? r.secrets_count,
+              last_scan_at: latest.completed_at || latest.created_at || r.last_scan_at,
+            }
+          })
+          setRepositories(enriched)
+        } else {
+          setRepositories(data)
+        }
+      } catch {
+        setRepositories(data)
+      }
     } catch (error) {
+      console.error('[REPOS] Failed to load:', error)
       toast.error('Failed to load repositories')
     } finally {
       setLoading(false)
@@ -187,105 +218,56 @@ export default function RepositoriesPage() {
     setUrlError(null)
 
     try {
-      // Save to backend for persistence + auto-scan
-      console.log('[REPO] Saving repository to backend:', newRepo.name)
-      
-      // Save repo to backend
-      let savedRepo: Repository | null = null
+      // Persist to Supabase — source of truth, scoped to user via RLS.
+      console.log('[REPO ADD] Persisting to Supabase:', newRepo)
+      let savedRepo: Repository
       try {
-        const saveResponse = await fetch('/api/repositories', {
+        savedRepo = await repositoryService.create(newRepo)
+        console.log('[REPO ADD] Saved to Supabase, id:', savedRepo.id)
+      } catch (supabaseErr: any) {
+        console.error('[REPO ADD] Supabase insert failed:', supabaseErr)
+        toast.error(
+          'Failed to save repository',
+          supabaseErr?.message || 'Check your Supabase configuration and RLS policies',
+        )
+        return
+      }
+
+      setRepositories((prev) => [savedRepo, ...prev])
+      setIsAddModalOpen(false)
+      setNewRepo({ name: '', url: '', provider: 'github', branch: 'main' })
+      toast.success('Repository added', `${savedRepo.name} saved to your account`)
+
+      // Auto-trigger initial scan using the real Supabase repo id.
+      toast.info('Scan started', `Scanning ${savedRepo.name}…`)
+      try {
+        const response = await fetch('/api/scan', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
           body: JSON.stringify({
-            name: newRepo.name,
-            url: newRepo.url,
-            provider: newRepo.provider,
-            branch: newRepo.branch || 'main',
+            scan_id: savedRepo.id,
+            repository_id: savedRepo.id,
+            repository_url: savedRepo.url,
+            branch: savedRepo.branch || 'main',
           }),
         })
-        if (saveResponse.ok) {
-          savedRepo = await saveResponse.json() as Repository
-          console.log('[REPO] Saved to backend, id:', savedRepo.id)
+        if (!response.ok) {
+          const errData = await response.json().catch(() => ({}))
+          toast.error(
+            'Scan failed to start',
+            errData?.detail || errData?.error || `Backend returned ${response.status}`,
+          )
+          return
         }
-      } catch (err) {
-        console.log('[REPO] Backend save failed, using local only')
+
+        // Capture scan_id so we poll the right scan record.
+        const triggerData = await response.json().catch(() => ({}))
+        const result = await waitForScanCompletion(savedRepo.id, { scanId: triggerData?.scan_id })
+        announceScanResult(savedRepo.id, savedRepo.name, result)
+      } catch (scanErr) {
+        console.error('[SCAN] Auto-scan failed:', scanErr)
+        toast.error('Scanner offline', 'Repo saved, but the scanner is unreachable')
       }
-
-      // Use backend-saved repo or create local fallback
-      const repoId = savedRepo?.id || Date.now()
-      const finalRepo: Repository = savedRepo || {
-        id: repoId,
-        user_id: 'demo-user-id-12345',
-        name: newRepo.name,
-        url: newRepo.url,
-        provider: newRepo.provider,
-        branch: newRepo.branch,
-        status: 'active',
-        last_scan_at: null,
-        secrets_count: 0,
-        webhook_secret: null,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      } as Repository
-
-      setRepositories(prev => [finalRepo, ...prev])
-      setIsAddModalOpen(false)
-      setNewRepo({ name: '', url: '', provider: 'github', branch: 'main' })
-      toast.success('Repository added', `${finalRepo.name} has been saved`)
-      
-      // Auto-trigger scan
-      console.log('[SCAN] Auto-triggering scan for:', finalRepo.name)
-      toast.info('Scan started', `Scanning ${finalRepo.name}...`)
-      
-      fetch('/api/scan', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-        body: JSON.stringify({
-          scan_id: repoId,
-          repository_id: repoId,
-          repository_url: newRepo.url,
-          branch: newRepo.branch || 'main',
-        }),
-      }).then(async (response) => {
-        console.log('[SCAN] Auto-scan response:', response.status)
-        if (response.ok) {
-          const data = await response.json()
-          console.log('[SCAN] Auto-scan result:', data)
-          toast.success('Scan queued', `${finalRepo.name} is being scanned`)
-        } else {
-          toast.error('Scan failed', `Backend returned ${response.status}`)
-        }
-      }).catch((err) => {
-        console.error('[SCAN] Auto-scan failed:', err)
-        toast.error('Scanner offline', 'Backend not reachable')
-      })
-      
-      if (isDemoMode()) return
-
-      console.log('[REPO ADD] Submitting repository:', newRepo)
-      const repo = await repositoryService.create(newRepo)
-      console.log('[REPO ADD] Repository created:', repo)
-      
-      setRepositories(prev => [repo, ...prev])
-      setIsAddModalOpen(false)
-      setNewRepo({ name: '', url: '', provider: 'github', branch: 'main' })
-      toast.success('Repository added', `${repo.name} has been added successfully`)
-      
-      // Auto-trigger scan for the new repository
-      toast.info('Scan queued', 'Initial scan will start automatically')
-      
-      // Trigger scan in background
-      setTimeout(async () => {
-        try {
-          console.log('[REPO ADD] Auto-triggering scan for repository:', repo.id)
-          await repositoryService.scan(repo.id)
-          toast.success('Scan started', 'Repository scan is now running')
-        } catch (scanError) {
-          console.error('[REPO ADD] Auto-scan failed:', scanError)
-          toast.warning('Scan delayed', 'Initial scan will retry shortly')
-        }
-      }, 2000)
-      
     } catch (error) {
       console.error('[REPO ADD] Failed to add repository:', error)
       const errorMessage = error instanceof Error ? error.message : 'Please try again'
@@ -295,73 +277,148 @@ export default function RepositoriesPage() {
     }
   }
 
+  /**
+   * Centralized, prominent completion notification used by every scan entry
+   * point. Also updates the card's `secrets_count` + `last_scan_at` in
+   * local state (and persists to Supabase so the card survives a refresh).
+   */
+  const announceScanResult = async (
+    repoId: number,
+    repoName: string,
+    result: { status: 'completed' | 'failed' | 'cancelled' | 'timeout'; secretsFound: number },
+  ) => {
+    console.log('[SCAN] Result for', repoName, result)
+
+    if (result.status === 'completed') {
+      const nowIso = new Date().toISOString()
+      // Optimistic local update so the card reflects the fresh scan immediately.
+      setRepositories((prev) =>
+        prev.map((r) =>
+          r.id === repoId
+            ? { ...r, secrets_count: result.secretsFound, last_scan_at: nowIso, status: 'active' }
+            : r,
+        ),
+      )
+      // Persist to Supabase (best effort — non-fatal if it fails).
+      try {
+        await repositoryService.update(repoId, {
+          secrets_count: result.secretsFound,
+          last_scan_at: nowIso,
+          status: 'active',
+        } as any)
+      } catch (e) {
+        console.warn('[SCAN] Could not persist scan result to Supabase:', e)
+      }
+
+      if (result.secretsFound > 0) {
+        toast.warning(
+          `Scan complete · ${result.secretsFound} secret${result.secretsFound === 1 ? '' : 's'} found`,
+          `${repoName} — open the Secrets page to review`,
+        )
+
+        // Evaluate user-defined policies against this scan's findings and
+        // fire their actions (toasts, Slack, generic webhook, …). Best
+        // effort — a failure here must never block the scan flow.
+        try {
+          const outcome = await runPoliciesForScan({ repoName })
+          if (outcome.firedPolicies > 0) {
+            for (const alert of outcome.alerts) {
+              toast.warning(
+                `Policy triggered · ${alert.policyName}`,
+                `${alert.findings.length} finding${alert.findings.length === 1 ? '' : 's'} in ${repoName}`,
+              )
+            }
+            const failed = outcome.executions.filter((e) => e.status === 'failed').length
+            if (failed > 0) {
+              toast.error(
+                `${failed} policy action${failed === 1 ? '' : 's'} failed`,
+                'Check browser console or the Policies page for details',
+              )
+            } else if (outcome.alerts.length === 0) {
+              toast.info(
+                `${outcome.firedPolicies} polic${outcome.firedPolicies === 1 ? 'y' : 'ies'} fired`,
+                'View details on the Policies page',
+              )
+            }
+          }
+        } catch (policyErr) {
+          console.warn('[POLICY] Evaluation failed:', policyErr)
+        }
+      } else {
+        toast.success('Scan complete ✓', `${repoName} — no secrets found`)
+      }
+    } else if (result.status === 'failed') {
+      setRepositories((prev) =>
+        prev.map((r) => (r.id === repoId ? { ...r, status: 'error' } : r)),
+      )
+      toast.error('Scan failed', `${repoName} could not be scanned`)
+    } else if (result.status === 'cancelled') {
+      toast.info('Scan cancelled', repoName)
+    } else {
+      toast.info('Scan still running', `${repoName} — check the Scans page for progress`)
+    }
+  }
+
   const handleScanRepository = async (repoId: number) => {
     console.log('[SCAN] handleScanRepository called with repoId:', repoId)
+    const repo = repositories.find((r) => r.id === repoId)
+
+    if (!repo) {
+      toast.error('Repository not found')
+      return
+    }
+
+    // Reject obviously-fake demo URLs so we don't waste time calling the scanner.
+    if (repo.url && repo.url.includes('acme-corp')) {
+      toast.warning(
+        'Demo repository',
+        'This is a demo repo with a fake URL. Add a real GitHub repo to scan.',
+      )
+      return
+    }
+
     setScanningRepoId(repoId)
+    // Immediate feedback so the user knows the click registered.
+    toast.info('Scan started', `Scanning ${repo.name}…`)
+
     try {
-      // Find the repository to get its URL
-      const repo = repositories.find(r => r.id === repoId)
-      console.log('[SCAN] Found repo:', repo ? { name: repo.name, url: repo.url, branch: repo.branch } : 'NOT FOUND')
-      console.log('[SCAN] isDemoMode:', isDemoMode())
-      
-      // In demo mode OR when Supabase auth isn't available, call the scanner API directly
-      if (isDemoMode() || !repo) {
-        if (!repo) {
-          console.error('[SCAN] Repository not found for id:', repoId)
-          toast.error('Repository not found')
-          return
-        }
-        
-        // Check if the repo URL is a fake demo URL
-        if (repo.url.includes('acme-corp')) {
-          console.log('[SCAN] Demo repo with fake URL, skipping')
-          toast.warning('Demo repository', 'This is a demo repo with a fake URL. Add a real GitHub repo to scan.')
-          return
-        }
-        
-        console.log('[SCAN] Calling /api/scan with:', { scan_id: repoId, repository_url: repo.url, branch: repo.branch })
-        toast.info('Scan started', `Scanning ${repo.name}...`)
-        
-        try {
-          // Use Next.js API proxy to avoid CORS issues
-          const response = await fetch('/api/scan', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-            body: JSON.stringify({
-              scan_id: repoId,
-              repository_id: repoId,
-              repository_url: repo.url,
-              branch: repo.branch || 'main',
-            }),
-          })
-          
-          console.log('[SCAN] Response status:', response.status)
-          
-          if (response.ok) {
-            const data = await response.json()
-            console.log('[SCAN] Success:', data)
-            toast.success('Scan queued', `${repo.name} is being scanned by the Node.js engine`)
-            setTimeout(() => {
-              toast.info('Scan running', 'Check the Detection page for results')
-            }, 3000)
-          } else {
-            const errData = await response.json().catch(() => ({ error: 'Unknown error' }))
-            console.error('[SCAN] Backend error:', response.status, errData)
-            toast.error('Scan failed', errData.error || `Backend returned ${response.status}`)
-          }
-        } catch (fetchErr) {
-          console.error('[SCAN] Cannot reach scanner API:', fetchErr)
-          toast.error('Scanner offline', 'Make sure the backend is running (npm run dev)')
-        }
+      // Always call the real scanner API — the old "demo vs non-demo" branch
+      // was silently routing non-demo users to a no-op Supabase call.
+      const response = await fetch('/api/scan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+        body: JSON.stringify({
+          scan_id: repoId,
+          repository_id: repoId,
+          repository_url: repo.url,
+          branch: repo.branch || 'main',
+        }),
+      })
+
+      console.log('[SCAN] Response status:', response.status)
+
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}))
+        console.error('[SCAN] Backend error:', response.status, errData)
+        toast.error(
+          'Scan failed to start',
+          errData?.error || errData?.detail || `Backend returned ${response.status}`,
+        )
         return
       }
-      
-      console.log('[SCAN] Using repositoryService.scan (non-demo mode)')
-      await repositoryService.scan(repoId)
-      toast.success('Scan started', 'Repository scan has been initiated')
+
+      const data = await response.json().catch(() => ({}))
+      console.log('[SCAN] Triggered:', data)
+
+      // Poll the scanner's own store until finished, then announce result.
+      const result = await waitForScanCompletion(repoId, { scanId: data?.scan_id })
+      announceScanResult(repoId, repo.name, result)
     } catch (error) {
       console.error('[SCAN] Failed to start scan:', error)
-      toast.error('Failed to start scan', error instanceof Error ? error.message : 'Please try again')
+      toast.error(
+        'Scanner offline',
+        'Could not reach the scanner backend. Make sure it is running.',
+      )
     } finally {
       setScanningRepoId(null)
     }
@@ -496,6 +553,33 @@ export default function RepositoriesPage() {
                       </div>
                     </div>
 
+                    {/* Scan result summary row */}
+                    {repo.last_scan_at && (
+                      <div className="mb-3">
+                        {repo.secrets_count > 0 ? (
+                          <div className="flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2">
+                            <span className="inline-flex h-2 w-2 rounded-full bg-amber-500" />
+                            <p className="text-sm text-amber-200 font-medium">
+                              {repo.secrets_count} secret{repo.secrets_count === 1 ? '' : 's'} found
+                            </p>
+                            <button
+                              onClick={() => router.push(`/secrets?repo=${repo.id}`)}
+                              className="ml-auto text-xs text-amber-200 hover:text-amber-100 underline underline-offset-2"
+                            >
+                              View findings →
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2">
+                            <span className="inline-flex h-2 w-2 rounded-full bg-emerald-500" />
+                            <p className="text-sm text-emerald-200 font-medium">
+                              Scan clean — no secrets found
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
                     {/* Stats */}
                     <div className="grid grid-cols-3 gap-4 mb-4 py-4 border-y border-[var(--border-color)]/50">
                       <div className="text-center">
@@ -529,7 +613,33 @@ export default function RepositoriesPage() {
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => window.open(repo.url, '_blank')}
+                        title="Download PDF report for this repo"
+                        disabled={!repo.last_scan_at}
+                        onClick={() => {
+                          if (!repo.last_scan_at) {
+                            toast.info('No scan yet', 'Run a scan on this repository first.')
+                            return
+                          }
+                          window.open(
+                            `/reports/pdf?repo=${encodeURIComponent(repo.name)}`,
+                            '_blank',
+                            'noopener,noreferrer',
+                          )
+                        }}
+                      >
+                        <FileDown className="w-4 h-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        title="Open repository"
+                        onClick={() => {
+                          if (repo.url) {
+                            window.open(repo.url, '_blank', 'noopener,noreferrer')
+                          } else {
+                            toast.error('No URL', 'This repository has no URL set')
+                          }
+                        }}
                       >
                         <ExternalLink className="w-4 h-4" />
                       </Button>

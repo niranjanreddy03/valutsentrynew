@@ -183,7 +183,7 @@ const DEFAULT_PLANS: PlanInfo[] = [
     id: 'premium',
     name: 'Premium',
     tier: 'premium',
-    price: { monthly: 29, yearly: 290, currency: 'USD', label: '$29/month' },
+    price: { monthly: 299, yearly: 2990, currency: 'INR', label: '₹299/month' },
     limits: {
       max_repositories: 10,
       scans_per_week: 50,
@@ -196,7 +196,7 @@ const DEFAULT_PLANS: PlanInfo[] = [
     id: 'premium_plus',
     name: 'Premium Plus',
     tier: 'premium_plus',
-    price: { monthly: 99, yearly: 990, currency: 'USD', label: '$99/month' },
+    price: { monthly: 999, yearly: 9990, currency: 'INR', label: '₹999/month' },
     limits: {
       max_repositories: 'Unlimited',
       scans_per_week: 'Unlimited',
@@ -228,9 +228,15 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
     }
 
     try {
-      // For demo mode or when API is not available, use local data
-      const isDemoMode = localStorage.getItem('demo_mode') === 'true'
-      
+      // For demo mode or when API is not available, use local data.
+      // The backend /api/v1/subscription/* routes are not implemented yet,
+      // so by default we use the local TIER_LIMITS/DEFAULT_PLANS tables and
+      // skip the network calls to avoid spamming the console with 404s.
+      // Set NEXT_PUBLIC_SUBSCRIPTION_API_ENABLED=true to enable live fetches.
+      const isDemoMode =
+        localStorage.getItem('demo_mode') === 'true' ||
+        process.env.NEXT_PUBLIC_SUBSCRIPTION_API_ENABLED !== 'true'
+
       if (isDemoMode) {
         const tierLimits = TIER_LIMITS[currentTier]
         setLimits(tierLimits)

@@ -20,6 +20,8 @@ interface ToastContextType {
   error: (title: string, message?: string) => void
   warning: (title: string, message?: string) => void
   info: (title: string, message?: string) => void
+  /** Convenience wrapper: showToast(message, type?) — used by auth pages */
+  showToast: (message: string, type?: ToastType) => void
 }
 
 const ToastContext = createContext<ToastContextType | undefined>(undefined)
@@ -70,9 +72,13 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   const error = useCallback((title: string, message?: string) => addToast('error', title, message), [addToast])
   const warning = useCallback((title: string, message?: string) => addToast('warning', title, message), [addToast])
   const info = useCallback((title: string, message?: string) => addToast('info', title, message), [addToast])
+  const showToast = useCallback(
+    (message: string, type: ToastType = 'info') => addToast(type, message),
+    [addToast],
+  )
 
   return (
-    <ToastContext.Provider value={{ toasts, addToast, removeToast, success, error, warning, info }}>
+    <ToastContext.Provider value={{ toasts, addToast, removeToast, success, error, warning, info, showToast }}>
       {children}
       {/* Toast Container */}
       <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-3">

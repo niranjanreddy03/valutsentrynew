@@ -10,11 +10,12 @@ import {
     Menu,
     Moon,
     Search,
-    Settings,
     Sun,
     User,
+    UserCog,
+    ChevronRight,
 } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 interface HeaderProps {
   alertCount: number
@@ -47,6 +48,19 @@ export default function Header({ alertCount, onMenuClick }: HeaderProps) {
   
   const displayName = fullName || email?.split('@')[0] || 'User'
   const displayEmail = email
+
+  // Close user menu on Escape for accessibility
+  const userMenuFirstItemRef = useRef<HTMLAnchorElement | null>(null)
+  useEffect(() => {
+    if (!showUserMenu) return
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setShowUserMenu(false)
+    }
+    window.addEventListener('keydown', handler)
+    // Move focus into menu for keyboard users
+    requestAnimationFrame(() => userMenuFirstItemRef.current?.focus())
+    return () => window.removeEventListener('keydown', handler)
+  }, [showUserMenu])
 
   return (
     <header className="h-12 border-b flex items-center justify-between px-4 relative z-50" style={{ background: 'var(--bg-secondary)', borderColor: 'var(--border-color)' }}>
@@ -166,39 +180,140 @@ export default function Header({ alertCount, onMenuClick }: HeaderProps) {
 
         {/* User Menu */}
         <div className="relative">
-          <button 
+          <button
             onClick={() => setShowUserMenu(!showUserMenu)}
-            className="flex items-center gap-2 p-1 rounded-md transition-colors hover:opacity-80"
+            aria-haspopup="menu"
+            aria-expanded={showUserMenu}
+            aria-label="Account menu"
+            className="group flex items-center gap-2 p-0.5 rounded-full transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/60 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-primary)]"
           >
-            <div className="w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center">
-              <span className="text-white text-sm font-medium">{userInitials}</span>
+            <div
+              className="w-8 h-8 rounded-full flex items-center justify-center ring-2 ring-transparent group-hover:ring-[var(--border-color)] transition-all"
+              style={{
+                background: 'linear-gradient(135deg, #3b82f6 0%, #60a5fa 100%)',
+                boxShadow: '0 4px 14px -4px rgba(59, 130, 246, 0.5)',
+              }}
+            >
+              <span className="text-white text-xs font-semibold tracking-wide">{userInitials}</span>
             </div>
           </button>
-          
-          {/* User Dropdown */}
+
+          {/* User Dropdown — premium glassmorphism */}
           {showUserMenu && (
-            <div className="absolute top-full right-0 mt-2 w-48 rounded-lg shadow-2xl z-[100]" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-color)' }}>
-              <div className="p-3 border-b" style={{ borderColor: 'var(--border-color)' }}>
-                <p className="font-medium" style={{ color: 'var(--text-primary)' }}>{displayName}</p>
-                <p className="text-xs" style={{ color: 'var(--text-muted)' }}>{displayEmail}</p>
-              </div>
-              <div className="p-1">
-                <a href="/profile" className="flex items-center gap-2 px-3 py-2 text-sm rounded-md transition-colors hover:opacity-80" style={{ color: 'var(--text-secondary)' }}>
-                  <User className="w-4 h-4" />
-                  <span>Profile</span>
-                </a>
-                <a href="/settings" className="flex items-center gap-2 px-3 py-2 text-sm rounded-md transition-colors hover:opacity-80" style={{ color: 'var(--text-secondary)' }}>
-                  <Settings className="w-4 h-4" />
-                  <span>Settings</span>
-                </a>
-              </div>
-              <div className="p-1 border-t" style={{ borderColor: 'var(--border-color)' }}>
-                <button 
-                  onClick={handleLogout}
-                  className="flex items-center gap-2 w-full px-3 py-2 text-sm text-red-400 rounded-md transition-colors hover:opacity-80"
+            <div
+              role="menu"
+              aria-label="Account"
+              className="absolute top-full right-0 mt-2.5 w-72 rounded-xl overflow-hidden z-[100] animate-scale-in origin-top-right"
+              style={{
+                background: 'color-mix(in srgb, var(--bg-secondary) 85%, transparent)',
+                backdropFilter: 'blur(16px) saturate(180%)',
+                WebkitBackdropFilter: 'blur(16px) saturate(180%)',
+                border: '1px solid rgba(82, 82, 82, 0.45)',
+                boxShadow:
+                  '0 1px 0 rgba(255,255,255,0.04) inset,' +
+                  '0 20px 50px -12px rgba(0, 0, 0, 0.6),' +
+                  '0 8px 20px -8px rgba(0, 0, 0, 0.4)',
+              }}
+            >
+              {/* Header: clickable profile link */}
+              <a
+                href="/settings"
+                ref={userMenuFirstItemRef}
+                role="menuitem"
+                onClick={() => setShowUserMenu(false)}
+                className="flex items-center gap-3 px-4 py-3.5 transition-colors duration-150 hover:bg-white/[0.04] focus:bg-white/[0.06] focus:outline-none"
+              >
+                <div
+                  className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0"
+                  style={{
+                    background: 'linear-gradient(135deg, #3b82f6 0%, #60a5fa 100%)',
+                    boxShadow: '0 4px 14px -4px rgba(59, 130, 246, 0.5)',
+                  }}
                 >
-                  <LogOut className="w-4 h-4" />
-                  <span>Sign out</span>
+                  <span className="text-white text-sm font-semibold">{userInitials}</span>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p
+                    className="text-sm font-semibold truncate"
+                    style={{ color: 'var(--text-primary)' }}
+                  >
+                    {displayName}
+                  </p>
+                  <p
+                    className="text-xs truncate mt-0.5"
+                    style={{ color: 'var(--text-muted)' }}
+                  >
+                    {displayEmail}
+                  </p>
+                </div>
+                <ChevronRight
+                  className="w-4 h-4 opacity-0 group-hover:opacity-100 transition-opacity"
+                  style={{ color: 'var(--text-muted)' }}
+                />
+              </a>
+
+              {/* Divider */}
+              <div className="h-px" style={{ background: 'rgba(82, 82, 82, 0.35)' }} />
+
+              {/* Navigation actions */}
+              <div className="p-1.5">
+                <a
+                  href="/settings"
+                  role="menuitem"
+                  onClick={() => setShowUserMenu(false)}
+                  className="group/item flex items-center gap-3 px-3 py-2.5 text-sm rounded-lg transition-colors duration-150 hover:bg-white/[0.05] focus:bg-white/[0.07] focus:outline-none"
+                  style={{ color: 'var(--text-secondary)' }}
+                >
+                  <UserCog
+                    className="w-4 h-4 opacity-70 group-hover/item:opacity-100 transition-opacity"
+                    style={{ color: 'var(--text-muted)' }}
+                  />
+                  <span className="flex-1">Manage account</span>
+                </a>
+
+                {/* Theme toggle — acts as a menu item */}
+                <button
+                  role="menuitem"
+                  onClick={toggleTheme}
+                  className="group/item w-full flex items-center gap-3 px-3 py-2.5 text-sm rounded-lg transition-colors duration-150 hover:bg-white/[0.05] focus:bg-white/[0.07] focus:outline-none"
+                  style={{ color: 'var(--text-secondary)' }}
+                >
+                  {theme === 'dark' ? (
+                    <Sun
+                      className="w-4 h-4 opacity-70 group-hover/item:opacity-100 transition-opacity"
+                      style={{ color: 'var(--text-muted)' }}
+                    />
+                  ) : (
+                    <Moon
+                      className="w-4 h-4 opacity-70 group-hover/item:opacity-100 transition-opacity"
+                      style={{ color: 'var(--text-muted)' }}
+                    />
+                  )}
+                  <span className="flex-1 text-left">
+                    {theme === 'dark' ? 'Light mode' : 'Dark mode'}
+                  </span>
+                  <span
+                    className="text-[10px] uppercase tracking-wider font-medium"
+                    style={{ color: 'var(--text-muted)' }}
+                  >
+                    {theme}
+                  </span>
+                </button>
+              </div>
+
+              {/* Divider */}
+              <div className="h-px" style={{ background: 'rgba(82, 82, 82, 0.35)' }} />
+
+              {/* Destructive */}
+              <div className="p-1.5">
+                <button
+                  role="menuitem"
+                  onClick={handleLogout}
+                  className="flex items-center gap-3 w-full px-3 py-2.5 text-sm rounded-lg transition-colors duration-150 hover:bg-red-500/[0.10] focus:bg-red-500/[0.14] focus:outline-none"
+                  style={{ color: '#f87171' }}
+                >
+                  <LogOut className="w-4 h-4 opacity-80" />
+                  <span className="flex-1 text-left">Sign out</span>
                 </button>
               </div>
             </div>

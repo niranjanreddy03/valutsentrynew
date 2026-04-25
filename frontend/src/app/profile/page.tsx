@@ -199,10 +199,10 @@ export default function ProfilePage() {
                 </div>
               </div>
 
-              <div 
+              <div
                 className="p-4 cursor-pointer transition-all hover:shadow-lg rounded-lg"
                 style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-color)' }}
-                onClick={() => router.push('/settings')}
+                onClick={() => router.push('/integrations')}
               >
                 <div className="flex items-center gap-3">
                   <div className="p-3 rounded-lg" style={{ background: 'var(--bg-tertiary)' }}>
@@ -210,10 +210,10 @@ export default function ProfilePage() {
                   </div>
                   <div>
                     <h3 className="font-medium" style={{ color: 'var(--text-primary)' }}>
-                      Account Settings
+                      Integrations
                     </h3>
                     <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-                      Notifications, integrations & more
+                      Slack, Jira, GitHub, GitLab &amp; webhooks
                     </p>
                   </div>
                 </div>

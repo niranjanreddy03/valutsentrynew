@@ -1,10 +1,18 @@
 'use client'
 
+import FeatureGate from '@/components/FeatureGate'
 import Header from '@/components/layout/Header'
 import Sidebar from '@/components/layout/Sidebar'
 import { Badge, Button, Card, Modal, Skeleton } from '@/components/ui'
 import { getAuthHeaders } from '@/lib/authHeaders'
 import { useToast } from '@/contexts/ToastContext'
+import {
+  inviteMember,
+  InviteValidationError,
+  getLocalPendingInvites,
+  retryLocalPendingInvite,
+  type InvitedMember,
+} from '@/lib/teamInvites'
 import {
     Check,
     ChevronRight,
@@ -82,17 +90,48 @@ export default function TeamsPage() {
     }
   }, [])
 
+  const mergeWithLocalPending = useCallback((teamId: number, backendMembers: TeamMember[]) => {
+    const local = getLocalPendingInvites(teamId)
+    if (local.length === 0) return backendMembers
+    const seen = new Set(backendMembers.map((m) => m.email?.toLowerCase()))
+    const extras = local
+      .filter((m) => !seen.has(m.email.toLowerCase()))
+      .map((m) => ({
+        id: m.id as number,
+        team_id: m.team_id,
+        user_id: m.user_id,
+        email: m.email,
+        name: m.name,
+        role: m.role as TeamMember['role'],
+        status: 'pending' as const,
+        joined_at: m.joined_at,
+      }))
+    return [...backendMembers, ...extras]
+  }, [])
+
   const fetchTeamMembers = useCallback(async (teamId: number) => {
+    let backendMembers: TeamMember[] = []
     try {
       const response = await fetch(`/api/teams?teamId=${teamId}&action=members`, { headers: getAuthHeaders() })
-      if (response.ok) {
-        const data = await response.json()
-        setTeamMembers(data)
-      }
+      if (response.ok) backendMembers = await response.json()
     } catch (err) {
       console.error('[TEAMS] Members fetch error:', err)
     }
-  }, [])
+    setTeamMembers(mergeWithLocalPending(teamId, backendMembers))
+
+    // Opportunistically retry any local pending invites — if backend is back up,
+    // they'll be persisted and removed from localStorage.
+    const pending = getLocalPendingInvites(teamId)
+    if (pending.length > 0) {
+      const teamName = (typeof window !== 'undefined' &&
+        (document.title || 'your team')) || 'your team'
+      await Promise.all(
+        pending.map((p) =>
+          retryLocalPendingInvite(p as InvitedMember, teamName).catch(() => false),
+        ),
+      )
+    }
+  }, [mergeWithLocalPending])
 
   useEffect(() => {
     const init = async () => {
@@ -147,60 +186,77 @@ export default function TeamsPage() {
   }
 
   const handleInvite = async () => {
-    if (!inviteEmail.trim()) return
     const teamId = inviteTeamId || selectedTeam?.id
     if (!teamId) {
       toast.error('Please select a team first')
       return
     }
+    const team = teams.find((t) => t.id === teamId)
+    const teamName = team?.name || 'your team'
+
     setInviting(true)
     try {
-      // 1. Save member to backend
-      const response = await fetch(`/api/teams?teamId=${teamId}&action=members`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-        body: JSON.stringify({ email: inviteEmail, role: inviteRole, name: inviteName }),
+      const outcome = await inviteMember({
+        teamId,
+        teamName,
+        email: inviteEmail,
+        name: inviteName,
+        role: inviteRole,
+        existingMembers: teamMembers,
       })
-      if (response.ok) {
-        const member = await response.json()
-        setTeamMembers(prev => [...prev, member])
 
-        // 2. Send invite email via Supabase
-        const teamName = teams.find(t => t.id === teamId)?.name || 'your team'
-        try {
-          const emailRes = await fetch('/api/invite-email', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              email: inviteEmail,
-              teamName,
-              inviterName: getAuthHeaders()['x-user-name'] || 'A team member',
-              role: inviteRole,
-            }),
-          })
-          const emailResult = await emailRes.json()
-          if (emailResult.success) {
-            toast.success('Invitation email sent!', `${inviteEmail} will receive an email to join ${teamName}`)
-          } else {
-            // Email failed but member was added
-            toast.warning('Member added', `${inviteEmail} was added but the invite email could not be sent: ${emailResult.error || 'Email service unavailable'}`)
-          }
-        } catch {
-          toast.warning('Member added', `${inviteEmail} was added but the invite email could not be sent`)
-        }
+      // Optimistically update the visible member list.
+      setTeamMembers((prev) => [
+        ...prev,
+        {
+          id: outcome.member.id as number,
+          team_id: outcome.member.team_id,
+          user_id: outcome.member.user_id,
+          email: outcome.member.email,
+          name: outcome.member.name,
+          role: outcome.member.role as TeamMember['role'],
+          status: outcome.member.status,
+          joined_at: outcome.member.joined_at,
+        },
+      ])
 
-        setShowInviteModal(false)
-        setInviteEmail('')
-        setInviteName('')
-        // Refresh team counts
-        fetchTeams()
-        if (selectedTeam) fetchTeamMembers(selectedTeam.id)
+      // Precise toast based on where the member landed + email status.
+      if (outcome.memberPersistedOn === 'backend' && outcome.emailSent) {
+        toast.success(
+          'Invitation sent!',
+          `${outcome.member.email} will receive an email to join ${teamName}`,
+        )
+      } else if (outcome.memberPersistedOn === 'backend' && !outcome.emailSent) {
+        toast.warning(
+          'Member added',
+          `Saved, but the invite email failed: ${outcome.emailError || 'email service unavailable'}`,
+        )
+      } else if (outcome.memberPersistedOn === 'local' && outcome.emailSent) {
+        toast.warning(
+          'Added locally · email sent',
+          `Backend unreachable (${outcome.backendError || 'offline'}). Will retry automatically.`,
+        )
       } else {
-        const err = await response.json()
-        toast.error('Invite failed', err.error)
+        toast.warning(
+          'Added locally',
+          `Backend unreachable and email failed. Will retry automatically when backend is back.`,
+        )
       }
-    } catch {
-      toast.error('Failed to send invitation')
+
+      setShowInviteModal(false)
+      setInviteEmail('')
+      setInviteName('')
+      fetchTeams()
+      if (selectedTeam) fetchTeamMembers(selectedTeam.id)
+    } catch (err) {
+      if (err instanceof InviteValidationError) {
+        toast.error('Check your input', err.message)
+      } else {
+        toast.error(
+          'Failed to send invitation',
+          err instanceof Error ? err.message : 'Unknown error',
+        )
+      }
     } finally {
       setInviting(false)
     }
@@ -272,6 +328,18 @@ export default function TeamsPage() {
         
         <main className="flex-1 overflow-y-auto overflow-x-hidden" style={{ background: 'var(--bg-primary)' }}>
           <div className="max-w-[1400px] mx-auto px-6 py-6 space-y-6">
+            <FeatureGate
+              feature="team_management"
+              title="Team management is a Premium Plus feature"
+              description="Invite teammates, assign roles, and collaborate on secret remediation — all with audit trails."
+              perks={[
+                'Unlimited team members',
+                'Role-based access (admin / developer / viewer)',
+                'Email invites with auto-retry',
+                'Per-member activity audit log',
+              ]}
+              requiredTier="premium_plus"
+            >
             {/* Header */}
             <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
               <div>
@@ -556,6 +624,7 @@ export default function TeamsPage() {
                 )}
               </>
             )}
+            </FeatureGate>
           </div>
         </main>
       </div>

@@ -27,6 +27,31 @@ interface Finding {
   assigned_team: string | null
   status: 'open' | 'in-progress' | 'fixed' | 'ignored'
   masked_value?: string
+  /** ML risk score 0–1 (or 0–100). Optional — heuristic fallback used if absent. */
+  ml_confidence?: number | null
+}
+
+/**
+ * ML risk score for a finding. Prefers backend-supplied `ml_confidence`;
+ * falls back to a deterministic heuristic blending severity + environment so
+ * the column is never empty and rows can always be sorted.
+ */
+function getMlScore(finding: Finding): number {
+  const raw = finding.ml_confidence
+  if (raw !== undefined && raw !== null && Number.isFinite(raw)) {
+    // Accept either 0–1 or 0–100 inputs and normalise to 0–100.
+    return Math.round(raw <= 1 ? raw * 100 : raw)
+  }
+  const sevWeight = { critical: 92, high: 78, medium: 55, low: 30 }[finding.severity] ?? 50
+  const envBoost = finding.environment === 'production' ? 6 : finding.environment === 'staging' ? 2 : 0
+  return Math.min(99, sevWeight + envBoost)
+}
+
+function mlScoreClass(score: number) {
+  if (score >= 85) return { bar: 'from-red-500 to-red-400', text: 'text-red-400' }
+  if (score >= 65) return { bar: 'from-amber-500 to-amber-400', text: 'text-amber-400' }
+  if (score >= 40) return { bar: 'from-blue-500 to-blue-400', text: 'text-blue-400' }
+  return { bar: 'from-emerald-500 to-emerald-400', text: 'text-emerald-400' }
 }
 
 interface CriticalFindingsTableProps {
@@ -254,6 +279,7 @@ export default function CriticalFindingsTable({
             <tr className="bg-[var(--bg-tertiary)]">
               <th className="px-5 py-3 text-left text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider">Type</th>
               <th className="px-5 py-3 text-left text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider">Severity</th>
+              <th className="px-5 py-3 text-left text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider">ML Score</th>
               <th className="px-5 py-3 text-left text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider">Repository</th>
               <th className="px-5 py-3 text-left text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider">Location</th>
               <th className="px-5 py-3 text-left text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider">Env</th>
@@ -266,7 +292,7 @@ export default function CriticalFindingsTable({
           <tbody className="divide-y divide-[var(--border-color)]">
             {filteredFindings.length === 0 ? (
               <tr>
-                <td colSpan={9} className="px-5 py-12 text-center">
+                <td colSpan={10} className="px-5 py-12 text-center">
                   <div className="empty-state">
                     <AlertOctagon className="w-12 h-12 text-[var(--text-muted)] opacity-50 mb-3" />
                     <p className="text-[var(--text-muted)]">No findings match your filters</p>
@@ -301,7 +327,37 @@ export default function CriticalFindingsTable({
                         {severity.label}
                       </span>
                     </td>
-                    
+
+                    {/* ML Score */}
+                    <td className="px-5 py-4">
+                      {(() => {
+                        const score = getMlScore(finding)
+                        const cls = mlScoreClass(score)
+                        const isHeuristic = finding.ml_confidence === undefined || finding.ml_confidence === null
+                        return (
+                          <div
+                            className="flex items-center gap-2 min-w-[120px]"
+                            title={
+                              isHeuristic
+                                ? 'Heuristic score (no ML model output available)'
+                                : 'Model confidence this finding is a true positive'
+                            }
+                          >
+                            <div className="flex-1 h-1.5 rounded-full bg-[var(--bg-tertiary)] overflow-hidden">
+                              <div
+                                className={`h-full rounded-full bg-gradient-to-r ${cls.bar} transition-all`}
+                                style={{ width: `${score}%` }}
+                              />
+                            </div>
+                            <span className={`text-xs font-semibold tabular-nums ${cls.text}`}>
+                              {score}
+                              {isHeuristic && <span className="text-[var(--text-muted)] font-normal ml-0.5">·~</span>}
+                            </span>
+                          </div>
+                        )
+                      })()}
+                    </td>
+
                     {/* Repository */}
                     <td className="px-5 py-4">
                       <div className="flex items-center gap-2">

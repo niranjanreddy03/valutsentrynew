@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls C:/Users/niran/Downloads/secret-sentry-master/secret-sentry-master/frontend/.env*)",
+      "mcp__Claude_Preview__preview_start",
+      "Bash(node scanner/engine/engine.test.js)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:8000/api/v1/scans)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3001/api/v1/scans)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:4000/api/v1/scans)",
+      "Bash(curl -s -X POST http://localhost:8000/api/v1/scans/trigger -H \"Content-Type: application/json\" -H \"x-user-id: test\" -d \"{\\\\\"repository_url\\\\\":\\\\\"https://github.com/octocat/Hello-World\\\\\",\\\\\"branch\\\\\":\\\\\"master\\\\\"}\" -w \"\\\\nHTTP: %{http_code}\\\\n\")",
+      "Bash(curl -s http://localhost:8000/api/v1/scans/33 -H \"x-user-id: test\")",
+      "Bash(node -e \"const {scanDirectory}=require\\('./directoryScanner'\\); scanDirectory\\(process.cwd\\(\\),{concurrency:24}\\).then\\(s=>console.log\\('OK',s.filesScanned,'scanned,',s.totalIssues,'findings,',s.durationMs+'ms'\\)\\).catch\\(e=>{console.error\\(e\\);process.exit\\(1\\)}\\);\")",
+      "Bash(curl -s http://localhost:8000/api/v1/scans)",
+      "Bash(npm run *)",
+      "mcp__83757396-f04b-4071-a921-f5411ce9c745__list_projects",
+      "mcp__83757396-f04b-4071-a921-f5411ce9c745__execute_sql",
+      "Bash(npm audit *)",
+      "Bash(npm install *)",
+      "Bash(xargs grep *)"
+    ]
+  }
+}

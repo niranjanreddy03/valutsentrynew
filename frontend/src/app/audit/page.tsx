@@ -1,5 +1,6 @@
 'use client'
 
+import FeatureGate from '@/components/FeatureGate'
 import Header from '@/components/layout/Header'
 import Sidebar from '@/components/layout/Sidebar'
 import { Badge, Button, Card, Skeleton } from '@/components/ui'
@@ -283,6 +284,18 @@ export default function AuditLogsPage() {
         
         <main className="flex-1 overflow-y-auto overflow-x-hidden" style={{ background: 'var(--bg-primary)' }}>
           <div className="max-w-[1400px] mx-auto px-6 py-6 space-y-6">
+            <FeatureGate
+              feature="audit_logs"
+              title="Audit logs are a Premium feature"
+              description="See every scan, invitation, policy change, and login across your workspace — with tamper-evident history."
+              perks={[
+                'Full compliance-grade activity history',
+                'Filter by user, action, or resource',
+                'Exportable audit trail (CSV / JSON)',
+                'Retained for 30+ days',
+              ]}
+              requiredTier="premium"
+            >
             {/* Header */}
             <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
               <div>
@@ -433,6 +446,7 @@ export default function AuditLogsPage() {
                 </>
               )}
             </Card>
+            </FeatureGate>
           </div>
         </main>
       </div>

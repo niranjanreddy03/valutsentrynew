@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { useSubscription, SubscriptionTier } from '@/contexts/SubscriptionContext'
 import { useAuth } from '@/contexts/AuthContext'
 import { useToast } from '@/contexts/ToastContext'
+import { Check, X, Sparkles } from 'lucide-react'
 
 const FEATURE_LABELS: Record<string, string> = {
   slack_integration: 'Slack Integration',
@@ -40,10 +41,12 @@ const HIGHLIGHTED_FEATURES = [
   'priority_support',
 ]
 
+const INR = (n: number) => `₹${n.toLocaleString('en-IN')}`
+
 export default function PricingPage() {
   const router = useRouter()
   const { user, isAuthenticated } = useAuth()
-  const { plans, status, upgradeTier, startTrial, isLoading, error } = useSubscription()
+  const { plans, upgradeTier, startTrial, error } = useSubscription()
   const toast = useToast()
   const [isUpgrading, setIsUpgrading] = useState(false)
   const [billingCycle, setBillingCycle] = useState<'monthly' | 'yearly'>('monthly')
@@ -56,17 +59,17 @@ export default function PricingPage() {
       router.push('/login?redirect=/pricing')
       return
     }
-
     if (tier === currentTier) {
       toast.info('You are already on this plan')
       return
     }
-
     setIsUpgrading(true)
     try {
       const success = await upgradeTier(tier)
       if (success) {
-        toast.success(`Successfully upgraded to ${tier === 'premium_plus' ? 'Premium Plus' : tier.charAt(0).toUpperCase() + tier.slice(1)}!`)
+        toast.success(
+          `Successfully upgraded to ${tier === 'premium_plus' ? 'Premium Plus' : tier.charAt(0).toUpperCase() + tier.slice(1)}!`,
+        )
         router.push('/')
       } else {
         toast.error(error || 'Failed to upgrade')
@@ -81,7 +84,6 @@ export default function PricingPage() {
       router.push('/login?redirect=/pricing')
       return
     }
-
     setIsUpgrading(true)
     try {
       const success = await startTrial()
@@ -100,28 +102,29 @@ export default function PricingPage() {
     const order: Record<string, number> = { basic: 0, premium: 1, premium_plus: 2 }
     return order[tier] ?? 0
   }
-
-  const canUpgradeTo = (tier: string): boolean => {
-    return getTierOrder(tier) > getTierOrder(currentTier)
-  }
+  const canUpgradeTo = (tier: string): boolean => getTierOrder(tier) > getTierOrder(currentTier)
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 py-12 px-4 sm:px-6 lg:px-8">
+    <div className="min-h-screen bg-[var(--bg-primary)] py-12 px-4 sm:px-6 lg:px-8 text-[var(--text-primary)]">
       <div className="max-w-7xl mx-auto">
         {/* Header */}
         <div className="text-center mb-12">
-          <h1 className="text-4xl font-extrabold text-gray-900 dark:text-white sm:text-5xl">
-            Choose Your Plan
-          </h1>
-          <p className="mt-4 text-xl text-gray-600 dark:text-gray-400">
+          <div className="inline-flex items-center gap-2 rounded-full border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 py-1 text-xs text-[var(--text-muted)]">
+            <Sparkles className="w-3.5 h-3.5 text-[var(--accent)]" />
+            Simple, transparent pricing
+          </div>
+          <h1 className="mt-4 text-4xl font-extrabold sm:text-5xl">Choose Your Plan</h1>
+          <p className="mt-4 text-lg text-[var(--text-muted)]">
             Secure your code with the right level of protection
           </p>
-          
-          {/* Current plan badge */}
+
           {isAuthenticated && (
-            <div className="mt-4">
-              <span className="inline-flex items-center px-4 py-2 rounded-full text-sm font-medium bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200">
-                Current Plan: {currentTier === 'premium_plus' ? 'Premium Plus' : currentTier.charAt(0).toUpperCase() + currentTier.slice(1)}
+            <div className="mt-6">
+              <span className="inline-flex items-center px-4 py-1.5 rounded-full text-sm font-medium border border-[var(--accent)]/40 bg-[var(--accent)]/10 text-[var(--accent)]">
+                Current Plan:{' '}
+                {currentTier === 'premium_plus'
+                  ? 'Premium Plus'
+                  : currentTier.charAt(0).toUpperCase() + currentTier.slice(1)}
                 {isTrialActive && ' (Trial)'}
               </span>
             </div>
@@ -129,12 +132,24 @@ export default function PricingPage() {
 
           {/* Billing toggle */}
           <div className="mt-8 flex items-center justify-center gap-4">
-            <span className={`text-sm ${billingCycle === 'monthly' ? 'text-gray-900 dark:text-white font-semibold' : 'text-gray-500'}`}>
+            <span
+              className={`text-sm ${
+                billingCycle === 'monthly'
+                  ? 'text-[var(--text-primary)] font-semibold'
+                  : 'text-[var(--text-muted)]'
+              }`}
+            >
               Monthly
             </span>
             <button
               onClick={() => setBillingCycle(billingCycle === 'monthly' ? 'yearly' : 'monthly')}
-              className="relative inline-flex h-6 w-11 items-center rounded-full bg-gray-200 dark:bg-gray-700 transition-colors"
+              className="relative inline-flex h-6 w-11 items-center rounded-full transition-colors"
+              style={{
+                background:
+                  billingCycle === 'yearly' ? 'var(--accent)' : 'var(--bg-secondary)',
+                border: '1px solid var(--border-color)',
+              }}
+              aria-label="Toggle billing cycle"
             >
               <span
                 className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
@@ -142,9 +157,15 @@ export default function PricingPage() {
                 }`}
               />
             </button>
-            <span className={`text-sm ${billingCycle === 'yearly' ? 'text-gray-900 dark:text-white font-semibold' : 'text-gray-500'}`}>
+            <span
+              className={`text-sm ${
+                billingCycle === 'yearly'
+                  ? 'text-[var(--text-primary)] font-semibold'
+                  : 'text-[var(--text-muted)]'
+              }`}
+            >
               Yearly
-              <span className="ml-1 text-green-600 dark:text-green-400">(Save 17%)</span>
+              <span className="ml-1 text-emerald-400">(Save 17%)</span>
             </span>
           </div>
         </div>
@@ -155,89 +176,83 @@ export default function PricingPage() {
             const isCurrentPlan = plan.tier === currentTier
             const canUpgrade = canUpgradeTo(plan.tier)
             const price = billingCycle === 'yearly' ? plan.price.yearly / 12 : plan.price.monthly
+            const isPopular = plan.tier === 'premium'
 
             return (
               <div
                 key={plan.id}
-                className={`relative rounded-2xl bg-white dark:bg-gray-800 shadow-xl border-2 transition-all ${
-                  plan.tier === 'premium'
-                    ? 'border-blue-500 scale-105 z-10'
+                className="relative rounded-2xl transition-all"
+                style={{
+                  background: 'var(--card-bg)',
+                  border: isPopular
+                    ? '1px solid var(--accent)'
                     : isCurrentPlan
-                    ? 'border-green-500'
-                    : 'border-gray-200 dark:border-gray-700'
-                }`}
+                    ? '1px solid rgb(16 185 129)'
+                    : '1px solid var(--border-color)',
+                  boxShadow: isPopular
+                    ? '0 0 0 4px color-mix(in srgb, var(--accent) 15%, transparent)'
+                    : 'none',
+                  transform: isPopular ? 'translateY(-4px)' : 'none',
+                }}
               >
-                {/* Popular badge */}
-                {plan.tier === 'premium' && (
-                  <div className="absolute -top-4 left-1/2 -translate-x-1/2">
-                    <span className="bg-blue-500 text-white px-4 py-1 rounded-full text-sm font-semibold">
+                {isPopular && (
+                  <div className="absolute -top-3 left-1/2 -translate-x-1/2">
+                    <span
+                      className="px-3 py-1 rounded-full text-xs font-semibold text-white"
+                      style={{ background: 'var(--accent)' }}
+                    >
                       Most Popular
                     </span>
                   </div>
                 )}
-
-                {/* Current plan badge */}
-                {isCurrentPlan && (
-                  <div className="absolute -top-4 left-1/2 -translate-x-1/2">
-                    <span className="bg-green-500 text-white px-4 py-1 rounded-full text-sm font-semibold">
+                {isCurrentPlan && !isPopular && (
+                  <div className="absolute -top-3 left-1/2 -translate-x-1/2">
+                    <span className="bg-emerald-500 text-white px-3 py-1 rounded-full text-xs font-semibold">
                       Current Plan
                     </span>
                   </div>
                 )}
 
                 <div className="p-8">
-                  {/* Plan name */}
-                  <h3 className="text-2xl font-bold text-gray-900 dark:text-white">
-                    {plan.name}
-                  </h3>
+                  <h3 className="text-2xl font-bold">{plan.name}</h3>
 
                   {/* Price */}
                   <div className="mt-4 flex items-baseline">
                     {plan.price.monthly === 0 ? (
-                      <span className="text-5xl font-extrabold text-gray-900 dark:text-white">Free</span>
+                      <span className="text-5xl font-extrabold">Free</span>
                     ) : (
                       <>
-                        <span className="text-5xl font-extrabold text-gray-900 dark:text-white">
-                          ${Math.round(price)}
-                        </span>
-                        <span className="ml-1 text-xl text-gray-500">/mo</span>
+                        <span className="text-5xl font-extrabold">{INR(Math.round(price))}</span>
+                        <span className="ml-1 text-xl text-[var(--text-muted)]">/mo</span>
                       </>
                     )}
                   </div>
                   {billingCycle === 'yearly' && plan.price.yearly > 0 && (
-                    <p className="mt-1 text-sm text-gray-500">
-                      Billed ${plan.price.yearly}/year
+                    <p className="mt-1 text-sm text-[var(--text-muted)]">
+                      Billed {INR(plan.price.yearly)}/year
                     </p>
                   )}
 
                   {/* Limits */}
                   <div className="mt-6 space-y-2">
-                    <div className="flex items-center text-gray-700 dark:text-gray-300">
-                      <svg className="w-5 h-5 text-green-500 mr-2" fill="currentColor" viewBox="0 0 20 20">
-                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                      </svg>
-                      <span>{typeof plan.limits.max_repositories === 'number' ? plan.limits.max_repositories : plan.limits.max_repositories} Repositories</span>
-                    </div>
-                    <div className="flex items-center text-gray-700 dark:text-gray-300">
-                      <svg className="w-5 h-5 text-green-500 mr-2" fill="currentColor" viewBox="0 0 20 20">
-                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                      </svg>
-                      <span>{typeof plan.limits.scans_per_week === 'number' ? plan.limits.scans_per_week : plan.limits.scans_per_week} Scans/Week</span>
-                    </div>
-                    <div className="flex items-center text-gray-700 dark:text-gray-300">
-                      <svg className="w-5 h-5 text-green-500 mr-2" fill="currentColor" viewBox="0 0 20 20">
-                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                      </svg>
-                      <span>{plan.limits.history_retention_days} Days History</span>
-                    </div>
+                    <LimitRow
+                      text={`${plan.limits.max_repositories} Repositories`}
+                    />
+                    <LimitRow text={`${plan.limits.scans_per_week} Scans/Week`} />
+                    <LimitRow text={`${plan.limits.history_retention_days} Days History`} />
                   </div>
 
-                  {/* CTA Button */}
+                  {/* CTA */}
                   <div className="mt-8">
                     {isCurrentPlan ? (
                       <button
                         disabled
-                        className="w-full py-3 px-4 rounded-lg font-semibold bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 cursor-not-allowed"
+                        className="w-full py-3 px-4 rounded-lg font-semibold cursor-not-allowed"
+                        style={{
+                          background: 'var(--bg-secondary)',
+                          color: 'var(--text-muted)',
+                          border: '1px solid var(--border-color)',
+                        }}
                       >
                         Current Plan
                       </button>
@@ -245,57 +260,77 @@ export default function PricingPage() {
                       <button
                         onClick={() => handleUpgrade(plan.tier as SubscriptionTier)}
                         disabled={isUpgrading}
-                        className={`w-full py-3 px-4 rounded-lg font-semibold transition-colors ${
-                          plan.tier === 'premium'
-                            ? 'bg-blue-600 hover:bg-blue-700 text-white'
+                        className="w-full py-3 px-4 rounded-lg font-semibold transition-colors text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                        style={{
+                          background: isPopular
+                            ? 'var(--accent)'
                             : plan.tier === 'premium_plus'
-                            ? 'bg-purple-600 hover:bg-purple-700 text-white'
-                            : 'bg-gray-900 hover:bg-gray-800 text-white dark:bg-white dark:text-gray-900 dark:hover:bg-gray-100'
-                        } disabled:opacity-50 disabled:cursor-not-allowed`}
+                            ? 'linear-gradient(135deg, var(--accent), #8b5cf6)'
+                            : 'var(--bg-secondary)',
+                          color: isPopular || plan.tier === 'premium_plus' ? 'white' : 'var(--text-primary)',
+                          border:
+                            isPopular || plan.tier === 'premium_plus'
+                              ? 'none'
+                              : '1px solid var(--border-color)',
+                        }}
                       >
-                        {isUpgrading ? 'Processing...' : `Upgrade to ${plan.name}`}
+                        {isUpgrading ? 'Processing…' : `Upgrade to ${plan.name}`}
                       </button>
                     ) : (
                       <button
                         disabled
-                        className="w-full py-3 px-4 rounded-lg font-semibold bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 cursor-not-allowed"
+                        className="w-full py-3 px-4 rounded-lg font-semibold cursor-not-allowed"
+                        style={{
+                          background: 'var(--bg-secondary)',
+                          color: 'var(--text-muted)',
+                          border: '1px solid var(--border-color)',
+                        }}
                       >
                         Included in Current Plan
                       </button>
                     )}
                   </div>
 
-                  {/* Trial button for basic users */}
                   {plan.tier === 'premium_plus' && currentTier === 'basic' && !isTrialActive && (
                     <button
                       onClick={handleStartTrial}
                       disabled={isUpgrading}
-                      className="w-full mt-3 py-2 px-4 rounded-lg font-medium text-purple-600 dark:text-purple-400 border-2 border-purple-600 dark:border-purple-400 hover:bg-purple-50 dark:hover:bg-purple-900/20 transition-colors disabled:opacity-50"
+                      className="w-full mt-3 py-2 px-4 rounded-lg font-medium transition-colors disabled:opacity-50"
+                      style={{
+                        color: 'var(--accent)',
+                        border: '1px solid var(--accent)',
+                        background: 'transparent',
+                      }}
                     >
                       Start 14-Day Free Trial
                     </button>
                   )}
 
                   {/* Features */}
-                  <div className="mt-8 border-t border-gray-200 dark:border-gray-700 pt-6">
-                    <h4 className="text-sm font-semibold text-gray-900 dark:text-white uppercase tracking-wide">
+                  <div
+                    className="mt-8 pt-6 border-t"
+                    style={{ borderColor: 'var(--border-color)' }}
+                  >
+                    <h4 className="text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">
                       Features
                     </h4>
                     <ul className="mt-4 space-y-3">
                       {HIGHLIGHTED_FEATURES.map((feature) => {
                         const hasFeature = plan.features[feature]
                         return (
-                          <li key={feature} className="flex items-center">
+                          <li key={feature} className="flex items-center text-sm">
                             {hasFeature ? (
-                              <svg className="w-5 h-5 text-green-500 mr-2" fill="currentColor" viewBox="0 0 20 20">
-                                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                              </svg>
+                              <Check className="w-4 h-4 text-emerald-400 mr-2 shrink-0" />
                             ) : (
-                              <svg className="w-5 h-5 text-gray-300 dark:text-gray-600 mr-2" fill="currentColor" viewBox="0 0 20 20">
-                                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
-                              </svg>
+                              <X className="w-4 h-4 text-[var(--text-muted)] opacity-40 mr-2 shrink-0" />
                             )}
-                            <span className={hasFeature ? 'text-gray-700 dark:text-gray-300' : 'text-gray-400 dark:text-gray-500'}>
+                            <span
+                              className={
+                                hasFeature
+                                  ? 'text-[var(--text-primary)]'
+                                  : 'text-[var(--text-muted)] opacity-60'
+                              }
+                            >
                               {FEATURE_LABELS[feature]}
                             </span>
                           </li>
@@ -309,39 +344,53 @@ export default function PricingPage() {
           })}
         </div>
 
-        {/* FAQ or additional info */}
+        {/* FAQ */}
         <div className="mt-16 text-center">
-          <h2 className="text-2xl font-bold text-gray-900 dark:text-white">
-            Frequently Asked Questions
-          </h2>
-          <div className="mt-8 max-w-3xl mx-auto space-y-6">
-            <div className="text-left">
-              <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
-                Can I cancel anytime?
-              </h3>
-              <p className="mt-2 text-gray-600 dark:text-gray-400">
-                Yes, you can cancel your subscription at any time. Your access will continue until the end of your billing period.
-              </p>
-            </div>
-            <div className="text-left">
-              <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
-                What happens when my trial ends?
-              </h3>
-              <p className="mt-2 text-gray-600 dark:text-gray-400">
-                When your trial ends, you'll be automatically moved to the Basic plan unless you upgrade. Your data will be retained.
-              </p>
-            </div>
-            <div className="text-left">
-              <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
-                Do you offer team or enterprise plans?
-              </h3>
-              <p className="mt-2 text-gray-600 dark:text-gray-400">
-                Yes! Contact us for custom enterprise pricing with volume discounts, dedicated support, and custom features.
-              </p>
-            </div>
+          <h2 className="text-2xl font-bold">Frequently Asked Questions</h2>
+          <div className="mt-8 max-w-3xl mx-auto space-y-6 text-left">
+            <FAQ
+              q="Can I cancel anytime?"
+              a="Yes, you can cancel your subscription at any time. Your access will continue until the end of your billing period."
+            />
+            <FAQ
+              q="What happens when my trial ends?"
+              a="When your trial ends, you'll be automatically moved to the Basic plan unless you upgrade. Your data will be retained."
+            />
+            <FAQ
+              q="Do you offer team or enterprise plans?"
+              a="Yes! Contact us for custom enterprise pricing with volume discounts, dedicated support, and custom features."
+            />
+            <FAQ
+              q="Which currencies do you support?"
+              a="All plans are billed in Indian Rupees (INR). Contact us if you need billing in a different currency."
+            />
           </div>
         </div>
       </div>
+    </div>
+  )
+}
+
+function LimitRow({ text }: { text: string }) {
+  return (
+    <div className="flex items-center text-sm text-[var(--text-secondary)]">
+      <Check className="w-4 h-4 text-emerald-400 mr-2 shrink-0" />
+      <span>{text}</span>
+    </div>
+  )
+}
+
+function FAQ({ q, a }: { q: string; a: string }) {
+  return (
+    <div
+      className="rounded-xl p-5"
+      style={{
+        background: 'var(--card-bg)',
+        border: '1px solid var(--border-color)',
+      }}
+    >
+      <h3 className="text-base font-semibold text-[var(--text-primary)]">{q}</h3>
+      <p className="mt-2 text-sm text-[var(--text-muted)]">{a}</p>
     </div>
   )
 }

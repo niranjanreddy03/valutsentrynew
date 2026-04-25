@@ -348,7 +348,9 @@ async function runScanInBackground(scanRecord, repo, branch) {
       branch,
       maskValues: true,
       useGitignore: true,
-      concurrency: 10,
+      // Match the scanner's new default; SSD/NVMe handles this fine and
+      // scan wall-time is dominated by I/O, not CPU.
+      concurrency: 24,
     });
 
     const durationSeconds = Math.round((Date.now() - startTime) / 1000);

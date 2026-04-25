@@ -1,4 +1,21 @@
 import { getSupabaseClient } from '@/lib/supabase/client'
+
+/**
+ * Lazy proxy to the Supabase browser client.
+ * Exported so consumers can write `supabase.auth.getSession()` etc.
+ * without calling `getSupabaseClient()` themselves. The underlying
+ * client is only instantiated on first property access (browser-side).
+ */
+export const supabase: ReturnType<typeof getSupabaseClient> = new Proxy(
+  {} as ReturnType<typeof getSupabaseClient>,
+  {
+    get(_target, prop) {
+      const client = getSupabaseClient() as any
+      const value = client[prop]
+      return typeof value === 'function' ? value.bind(client) : value
+    },
+  },
+)
 import type {
     Alert, ApiKey,
     InsertApiKey, InsertIntegration,
@@ -881,39 +898,107 @@ export const apiKeyService = {
     }
   },
 
-  async create(name: string, permissions: string[] = ['read']): Promise<{ key: string; apiKey: ApiKey }> {
+  async create(
+    name: string,
+    permissions: string[] = ['read'],
+    expiresAt: string | null = null,
+  ): Promise<{ key: string; apiKey: ApiKey }> {
     const supabase = getSupabaseClient()
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) throw new Error('Not authenticated')
+    console.log('[API KEYS] Creating key:', name, 'perms:', permissions, 'expires:', expiresAt)
 
-    // Generate a random API key
-    const key = `ss_${crypto.randomUUID().replace(/-/g, '')}`
+    // Use session (cached) rather than getUser — avoids a round-trip and
+    // matches what repositoryService does.
+    const { data: { session }, error: sessionError } = await supabase.auth.getSession()
+    if (sessionError) {
+      console.error('[API KEYS] Session error:', sessionError.message)
+      throw new Error('Session error. Please sign in again.')
+    }
+    const user = session?.user
+    if (!user) throw new Error('Not authenticated. Please sign in again.')
+
+    // The api_keys.user_id FK points at public.users(id). If that row is
+    // missing (trigger didn't fire, signup predates the fix migration, …)
+    // the insert will fail with a 23503 foreign-key violation. Make sure
+    // the row exists first — same guard repositoryService uses.
+    try {
+      const { data: existing, error: checkErr } = await supabase
+        .from('users')
+        .select('id')
+        .eq('id', user.id)
+        .maybeSingle()
+
+      if (checkErr && checkErr.code !== 'PGRST116') {
+        console.warn('[API KEYS] Profile check non-fatal error:', checkErr.message)
+      }
+
+      if (!existing) {
+        console.log('[API KEYS] Creating missing public.users row for', user.id)
+        const { error: insertErr } = await supabase.from('users').insert({
+          id: user.id,
+          email: user.email || '',
+          full_name: user.user_metadata?.full_name || user.email?.split('@')[0] || 'User',
+          subscription_tier: 'basic',
+        } as any)
+        if (insertErr && insertErr.code !== '23505') {
+          console.warn('[API KEYS] Profile insert non-fatal:', insertErr.message)
+        }
+      }
+    } catch (profileErr: any) {
+      console.warn('[API KEYS] Profile ensure failed (continuing):', profileErr?.message)
+    }
+
+    // Generate a random API key. Fallback to Math.random if randomUUID
+    // isn't available (very old browsers or insecure contexts).
+    const uuid =
+      typeof crypto !== 'undefined' && 'randomUUID' in crypto
+        ? (crypto as any).randomUUID().replace(/-/g, '')
+        : Array.from({ length: 32 }, () => Math.floor(Math.random() * 16).toString(16)).join('')
+    const key = `ss_${uuid}`
     const keyPrefix = key.substring(0, 10)
-    
-    // Hash the key (in production, use proper server-side hashing)
-    const keyHash = await crypto.subtle.digest(
-      'SHA-256',
-      new TextEncoder().encode(key)
-    ).then(hash => 
-      Array.from(new Uint8Array(hash))
-        .map(b => b.toString(16).padStart(2, '0'))
+
+    // Hash the key (SHA-256 via SubtleCrypto — localhost and HTTPS only).
+    let keyHash: string
+    try {
+      const hashBuf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(key))
+      keyHash = Array.from(new Uint8Array(hashBuf))
+        .map((b) => b.toString(16).padStart(2, '0'))
         .join('')
-    )
+    } catch (hashErr) {
+      console.error('[API KEYS] SubtleCrypto unavailable:', hashErr)
+      throw new Error('Your browser does not expose crypto.subtle. Use HTTPS or localhost.')
+    }
+
+    const payload: any = {
+      user_id: user.id,
+      name,
+      key_hash: keyHash,
+      key_prefix: keyPrefix,
+      permissions,
+      is_active: true,
+    }
+    if (expiresAt) payload.expires_at = expiresAt
 
     const { data, error } = await supabase
       .from('api_keys')
-      // @ts-expect-error - Supabase type inference issue
-      .insert({
-        user_id: user.id,
-        name,
-        key_hash: keyHash,
-        key_prefix: keyPrefix,
-        permissions,
-      } as InsertApiKey)
+      .insert(payload)
       .select()
       .single()
 
-    if (error) throw error
+    if (error) {
+      console.error('[API KEYS] Insert failed:', error)
+      // Surface the real error so the UI toast is actionable.
+      if (error.code === '23503') {
+        throw new Error(
+          'Could not create API key: your user profile is missing. Run the fix_user_profile_insert.sql migration in Supabase.',
+        )
+      }
+      if (error.code === '42501' || /row-level security/i.test(error.message || '')) {
+        throw new Error(
+          'Permission denied by RLS. Make sure the "Users can insert own api keys" policy is enabled on public.api_keys.',
+        )
+      }
+      throw new Error(error.message || 'Failed to insert API key')
+    }
     return { key, apiKey: data as ApiKey }
   },
 

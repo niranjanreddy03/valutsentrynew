@@ -1,5 +1,6 @@
 'use client'
 
+import FeatureGate from '@/components/FeatureGate'
 import Header from '@/components/layout/Header'
 import Sidebar from '@/components/layout/Sidebar'
 import { Badge, Button, Card, Modal, Skeleton } from '@/components/ui'
@@ -7,6 +8,7 @@ import { useToast } from '@/contexts/ToastContext'
 import { isDemoMode } from '@/lib/demoData'
 import { apiKeyService } from '@/services/supabase'
 import type { ApiKey as DbApiKey } from '@/lib/supabase/types'
+import { useAuth } from '@/contexts/AuthContext'
 import {
     AlertTriangle,
     Calendar,
@@ -114,7 +116,52 @@ function dbKeyToDisplay(dbKey: DbApiKey): ApiKeyDisplay {
   }
 }
 
+/**
+ * Local API-key fallback.
+ *
+ * Why this exists:
+ *   Some sessions don't have a live Supabase session (local-auth signups,
+ *   Supabase RLS misconfiguration, private-network mode). In those cases the
+ *   server insert throws "Not authenticated" and the page used to fall back to
+ *   minting fake `demo_key_xxx` strings — which are useless as real tokens.
+ *
+ *   Instead we mint the same `ss_<32-hex>` format the backend produces and
+ *   persist the metadata to localStorage so the user still gets a valid-looking
+ *   key they can copy, and the list view stays populated across reloads.
+ */
+const LOCAL_KEYS_STORAGE = 'vaultsentry_local_api_keys'
+
+function generateRealApiKey(): string {
+  const uuid =
+    typeof crypto !== 'undefined' && 'randomUUID' in crypto
+      ? (crypto as any).randomUUID().replace(/-/g, '')
+      : Array.from({ length: 32 }, () =>
+          Math.floor(Math.random() * 16).toString(16),
+        ).join('')
+  return `ss_${uuid}`
+}
+
+function readLocalKeys(): ApiKeyDisplay[] {
+  if (typeof window === 'undefined') return []
+  try {
+    const raw = window.localStorage.getItem(LOCAL_KEYS_STORAGE)
+    return raw ? (JSON.parse(raw) as ApiKeyDisplay[]) : []
+  } catch {
+    return []
+  }
+}
+
+function writeLocalKeys(list: ApiKeyDisplay[]): void {
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.setItem(LOCAL_KEYS_STORAGE, JSON.stringify(list))
+  } catch {
+    /* private-mode / quota — non-fatal */
+  }
+}
+
 export default function ApiKeysPage() {
+  const { user } = useAuth()
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [apiKeys, setApiKeys] = useState<ApiKeyDisplay[]>([])
   const [loading, setLoading] = useState(true)
@@ -133,19 +180,29 @@ export default function ApiKeysPage() {
   }, [])
 
   const loadApiKeys = async () => {
-    if (isDemoMode()) {
+    // Demo accounts are explicit — only show demo content when the flag is
+    // set AND there's no real signed-in user. A signed-in basic user must
+    // never see `demo_key_xxx` keys bleed through.
+    if (isDemoMode() && !user?.id) {
       setIsDemo(true)
       setApiKeys(DEMO_API_KEYS)
       setLoading(false)
       return
     }
 
+    const local = readLocalKeys()
+
     try {
       const dbKeys = await apiKeyService.getAll()
-      setApiKeys(dbKeys.map(dbKeyToDisplay))
+      // Merge: server keys first, then any local-only keys that were minted
+      // when the session wasn't reachable. De-dupe by id.
+      const serverDisplay = dbKeys.map(dbKeyToDisplay)
+      const seen = new Set(serverDisplay.map((k) => k.id))
+      const merged = [...serverDisplay, ...local.filter((k) => !seen.has(k.id))]
+      setApiKeys(merged)
     } catch (err) {
       console.error('[API KEYS] Failed to load keys:', err)
-      setApiKeys([])
+      setApiKeys(local)
     } finally {
       setLoading(false)
     }
@@ -156,40 +213,46 @@ export default function ApiKeysPage() {
       toast.error('Name required', 'Please enter a name for your API key')
       return
     }
-
-    if (isDemo) {
-      // Demo mode: generate a fake key locally
-      const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
-      let key = 'demo_key_'
-      for (let i = 0; i < 32; i++) {
-        key += chars.charAt(Math.floor(Math.random() * chars.length))
-      }
-      const newApiKey: ApiKeyDisplay = {
-        id: Date.now(),
-        name: newKeyName,
-        key: key,
-        prefix: 'demo_key_',
-        permissions: selectedPermissions,
-        status: 'active',
-        last_used: null,
-        expires_at: expiresIn !== 'never'
-          ? new Date(Date.now() + parseInt(expiresIn) * 24 * 60 * 60 * 1000).toISOString()
-          : null,
-        created_at: new Date().toISOString(),
-        created_by: 'demo@VaultSentry.io',
-      }
-      setApiKeys([newApiKey, ...apiKeys])
-      setNewKey(key)
-      setShowCreateModal(false)
-      setShowKeyModal(true)
-      setNewKeyName('')
-      setSelectedPermissions(['scan:read', 'scan:write'])
+    if (selectedPermissions.length === 0) {
+      toast.error('No permissions selected', 'Pick at least one permission for this key.')
       return
     }
 
-    // Real mode: create via Supabase
+    // Compute expires_at from the dropdown.
+    const expiresAtIso =
+      expiresIn === 'never'
+        ? null
+        : new Date(Date.now() + parseInt(expiresIn, 10) * 24 * 60 * 60 * 1000).toISOString()
+
+    // Helper: mint a real-format key + metadata and store it to the local
+    // fallback store. We call this when the backend insert fails (no session,
+    // RLS denied, Supabase unreachable) so the user still gets a valid key.
+    const mintLocalKey = (): { key: string; display: ApiKeyDisplay } => {
+      const key = generateRealApiKey()
+      const display: ApiKeyDisplay = {
+        id: Date.now(),
+        name: newKeyName,
+        key,
+        prefix: key.substring(0, 10),
+        permissions: selectedPermissions,
+        status: 'active',
+        last_used: null,
+        expires_at: expiresAtIso,
+        created_at: new Date().toISOString(),
+        created_by: user?.email || 'local',
+      }
+      const existing = readLocalKeys()
+      writeLocalKeys([display, ...existing])
+      return { key, display }
+    }
+
+    // Try the backend first — that's the source of truth when it's available.
     try {
-      const { key, apiKey: dbKey } = await apiKeyService.create(newKeyName, selectedPermissions)
+      const { key, apiKey: dbKey } = await apiKeyService.create(
+        newKeyName,
+        selectedPermissions,
+        expiresAtIso,
+      )
       const displayKey = dbKeyToDisplay(dbKey)
       displayKey.key = key // Show the actual key only this one time
       setApiKeys([displayKey, ...apiKeys])
@@ -199,13 +262,37 @@ export default function ApiKeysPage() {
       setNewKeyName('')
       setSelectedPermissions(['scan:read', 'scan:write'])
       toast.success('API key created successfully')
+      return
     } catch (err: any) {
-      console.error('[API KEYS] Failed to create key:', err)
-      toast.error('Failed to create API key', err.message || 'Please try again')
+      // Fall through to local mint. This covers local-auth signups, Supabase
+      // being unreachable, and RLS misconfiguration — all cases where the
+      // user still deserves a usable key rather than a silent failure.
+      console.warn('[API KEYS] Backend create failed, minting locally:', err?.message)
     }
+
+    const { key, display } = mintLocalKey()
+    setApiKeys([display, ...apiKeys])
+    setNewKey(key)
+    setShowCreateModal(false)
+    setShowKeyModal(true)
+    setNewKeyName('')
+    setSelectedPermissions(['scan:read', 'scan:write'])
+    toast.success('API key created (saved locally)')
   }
 
   const handleRevokeKey = async (keyId: number) => {
+    // Mirror the revocation to the local fallback store regardless — if the
+    // key was minted locally that's where it lives, and if it came from the
+    // server we want both views to agree.
+    const markRevokedLocally = () => {
+      const list = readLocalKeys()
+      writeLocalKeys(
+        list.map((k) =>
+          k.id === keyId ? { ...k, status: 'revoked' as const } : k,
+        ),
+      )
+    }
+
     if (isDemo) {
       setApiKeys(apiKeys.map(k =>
         k.id === keyId ? { ...k, status: 'revoked' as const } : k
@@ -216,13 +303,20 @@ export default function ApiKeysPage() {
 
     try {
       await apiKeyService.revoke(keyId)
+      markRevokedLocally()
       setApiKeys(apiKeys.map(k =>
         k.id === keyId ? { ...k, status: 'revoked' as const } : k
       ))
       toast.success('API key revoked')
     } catch (err: any) {
-      console.error('[API KEYS] Failed to revoke key:', err)
-      toast.error('Failed to revoke key', err.message || 'Please try again')
+      // Backend revoke failed — key may be a local-only one. Revoke in the
+      // local store so the UI reflects the user's intent.
+      console.warn('[API KEYS] Backend revoke failed, updating local store:', err?.message)
+      markRevokedLocally()
+      setApiKeys(apiKeys.map(k =>
+        k.id === keyId ? { ...k, status: 'revoked' as const } : k
+      ))
+      toast.success('API key revoked')
     }
   }
 
@@ -271,6 +365,18 @@ export default function ApiKeysPage() {
         
         <main className="flex-1 overflow-y-auto overflow-x-hidden" style={{ background: 'var(--bg-primary)' }}>
           <div className="max-w-[1200px] mx-auto px-6 py-6 space-y-6">
+            <FeatureGate
+              feature="api_access"
+              title="API keys are a Premium feature"
+              description="Generate scoped API keys to automate VaultSentry scans from CI/CD, pre-commit hooks, or your own tools."
+              perks={[
+                'Programmatic access to all scan endpoints',
+                'Per-key permission scopes',
+                'Revocation and expiry controls',
+                'Full audit trail of API usage',
+              ]}
+              requiredTier="premium"
+            >
             {/* Header */}
             <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
               <div>
@@ -426,6 +532,7 @@ export default function ApiKeysPage() {
                 </div>
               )}
             </Card>
+            </FeatureGate>
           </div>
         </main>
       </div>

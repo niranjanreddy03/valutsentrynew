@@ -60,6 +60,8 @@ module.exports = {
         'scale-in': 'scaleIn 0.2s ease-out',
         'pulse-glow': 'pulseGlow 2s ease-in-out infinite',
         'shimmer': 'shimmer 2s linear infinite',
+        'shake': 'shake 0.45s cubic-bezier(.36,.07,.19,.97) both',
+        'grid-pan': 'gridPan 40s linear infinite',
       },
       keyframes: {
         fadeIn: {
@@ -85,6 +87,16 @@ module.exports = {
         shimmer: {
           '0%': { backgroundPosition: '-200% 0' },
           '100%': { backgroundPosition: '200% 0' },
+        },
+        shake: {
+          '10%,90%': { transform: 'translate3d(-1px, 0, 0)' },
+          '20%,80%': { transform: 'translate3d(2px, 0, 0)' },
+          '30%,50%,70%': { transform: 'translate3d(-4px, 0, 0)' },
+          '40%,60%': { transform: 'translate3d(4px, 0, 0)' },
+        },
+        gridPan: {
+          '0%': { backgroundPosition: '0 0' },
+          '100%': { backgroundPosition: '80px 80px' },
         },
       },
       backdropBlur: {
