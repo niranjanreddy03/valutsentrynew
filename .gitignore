@@ -67,3 +67,4 @@ scanner/data/store.json
 .gemini/
 
 .claude/
+".claude/worktrees/" 
