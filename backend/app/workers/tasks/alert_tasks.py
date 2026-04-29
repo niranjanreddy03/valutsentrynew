@@ -11,6 +11,7 @@ from celery.utils.log import get_task_logger
 import httpx
 
 from app.core.config import settings
+from app.core.url_safety import validate_safe_url, UnsafeURLError
 
 logger = get_task_logger(__name__)
 
@@ -163,13 +164,15 @@ def send_slack_alert(
     }
     
     try:
+        validate_safe_url(webhook_url, allowed_hosts=['hooks.slack.com'])
         response = httpx.post(
             webhook_url,
             json=payload,
-            timeout=10.0
+            timeout=10.0,
+            follow_redirects=False,
         )
         response.raise_for_status()
-        
+
         _update_alert_notification(alert_id, 'slack', 'sent')
         logger.info(f"Slack alert sent for alert {alert_id}")
         
@@ -283,11 +286,13 @@ def send_webhook_notification(
 ):
     """Send alert to custom webhook"""
     try:
+        validate_safe_url(webhook_url)
         response = httpx.post(
             webhook_url,
             json=payload,
             timeout=30.0,
-            headers={'Content-Type': 'application/json'}
+            headers={'Content-Type': 'application/json'},
+            follow_redirects=False,
         )
         response.raise_for_status()
         
@@ -359,11 +364,14 @@ def create_jira_issue(
         if assignee:
             payload['fields']['assignee'] = {'name': assignee}
         
+        issue_endpoint = f'{jira_url}/rest/api/3/issue'
+        validate_safe_url(issue_endpoint)
         response = httpx.post(
-            f'{jira_url}/rest/api/3/issue',
+            issue_endpoint,
             json=payload,
             auth=(jira_user, jira_token),
-            timeout=30.0
+            timeout=30.0,
+            follow_redirects=False,
         )
         response.raise_for_status()
         

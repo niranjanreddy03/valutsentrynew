@@ -1,0 +1,116 @@
+# Render Blueprint — Vault Sentry backend
+# Deploy: connect this repo to Render, choose "Blueprint", point at this file.
+# Docs: https://render.com/docs/blueprint-spec
+
+services:
+  # FastAPI HTTP API
+  - type: web
+    name: vaultsentry-api
+    runtime: docker
+    plan: free
+    region: oregon
+    rootDir: backend
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    # Override the Dockerfile's final-stage CMD so we run the production
+    # server (no --reload) and bind to Render's $PORT.
+    dockerCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 2
+    healthCheckPath: /health
+    envVars:
+      - key: DEBUG
+        value: "false"
+      - key: ENVIRONMENT
+        value: production
+      - key: PORT
+        value: "8000"
+      - key: SECRET_KEY
+        generateValue: true
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: vaultsentry-redis
+          property: connectionString
+      # Set these in the Render dashboard (do NOT commit values):
+      - key: DATABASE_URL
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_KEY
+        sync: false
+      - key: GITHUB_TOKEN
+        sync: false
+      - key: GITHUB_CLIENT_ID
+        sync: false
+      - key: GITHUB_CLIENT_SECRET
+        sync: false
+      - key: GITHUB_WEBHOOK_SECRET
+        sync: false
+      - key: AWS_ACCESS_KEY_ID
+        sync: false
+      - key: AWS_SECRET_ACCESS_KEY
+        sync: false
+      - key: SLACK_WEBHOOK_URL
+        sync: false
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      # Set CORS_ORIGINS to your Vercel frontend URL(s), comma-separated.
+      # Example: https://vaultsentry.vercel.app,https://www.yourdomain.com
+      - key: CORS_ORIGINS
+        sync: false
+
+  # Celery worker (background scans, alerts, ML)
+  - type: worker
+    name: vaultsentry-worker
+    runtime: docker
+    plan: free
+    region: oregon
+    rootDir: backend
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    dockerCommand: celery -A app.workers.celery_app worker --loglevel=info --concurrency=2
+    envVars:
+      - key: DEBUG
+        value: "false"
+      - key: ENVIRONMENT
+        value: production
+      - fromService:
+          type: web
+          name: vaultsentry-api
+          envVarKey: SECRET_KEY
+        key: SECRET_KEY
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: vaultsentry-redis
+          property: connectionString
+      - key: DATABASE_URL
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_KEY
+        sync: false
+      - key: GITHUB_TOKEN
+        sync: false
+      - key: SLACK_WEBHOOK_URL
+        sync: false
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+
+  # Managed Redis (Celery broker + result backend)
+  - type: keyvalue
+    name: vaultsentry-redis
+    plan: free
+    region: oregon
+    ipAllowList: []   # private network only

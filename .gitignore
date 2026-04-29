@@ -67,4 +67,14 @@ scanner/data/store.json
 .gemini/
 
 .claude/
-".claude/worktrees/" 
+
+# Windows root cert export (do NOT commit)
+*.sst
+roots.sst
+
+# Local databases / runtime artifacts
+*.db
+*.sqlite
+*.sqlite3
+backend/secret_sentry.db
+backend/logs/

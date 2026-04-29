@@ -572,14 +572,19 @@ def _scan_docker_image(image_url: str, target_dir: str):
 
 def _download_package(url: str, package_type: str, target_dir: str):
     """Download npm/pypi package"""
-    import urllib.request
     import zipfile
     import tarfile
-    
-    # Download package
+    from app.core.url_safety import safe_download
+
+    # Restrict to known package registries to defeat SSRF.
+    allowed = {
+        'npm': ['registry.npmjs.org'],
+        'pypi': ['pypi.org', 'files.pythonhosted.org'],
+    }.get(package_type)
+
     file_name = os.path.join(target_dir, 'package.archive')
-    urllib.request.urlretrieve(url, file_name)
-    
+    safe_download(url, file_name, allowed_hosts=allowed)
+
     # Extract
     if file_name.endswith('.tar.gz') or file_name.endswith('.tgz'):
         with tarfile.open(file_name) as tar:
@@ -591,10 +596,10 @@ def _download_package(url: str, package_type: str, target_dir: str):
 
 def _download_archive(url: str, target_dir: str):
     """Download and extract archive"""
-    import urllib.request
-    
+    from app.core.url_safety import safe_download
+
     file_name = os.path.join(target_dir, 'archive')
-    urllib.request.urlretrieve(url, file_name)
+    safe_download(url, file_name)
     
     # Auto-detect and extract
     import tarfile

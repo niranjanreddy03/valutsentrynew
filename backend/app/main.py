@@ -70,12 +70,28 @@ app = FastAPI(
 )
 
 # CORS Middleware
+# CSRF defense for this API: it authenticates via Authorization: Bearer
+# tokens (no cookies), so cross-site form posts cannot attach credentials.
+# We additionally lock CORS to an explicit origin list and a narrow set of
+# methods/headers — never use "*" alongside allow_credentials=True, which
+# the spec forbids and which would re-open CSRF if cookie auth is ever added.
+if "*" in settings.CORS_ORIGINS:
+    raise RuntimeError(
+        "CORS_ORIGINS must not contain '*' when credentials are allowed"
+    )
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=[
+        "Authorization",
+        "Content-Type",
+        "X-Requested-With",
+        "Accept",
+    ],
+    max_age=600,
 )
 
 # Rate Limiting Middleware
