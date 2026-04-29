@@ -17,6 +17,7 @@ import {
     Radar,
     Scale,
     Settings,
+    Sparkles,
     Shield,
     ShieldAlert,
     User,
@@ -58,6 +59,7 @@ const adminNavigation: NavItem[] = [
 ]
 
 const bottomNavigation = [
+  { name: 'Pricing', href: '/pricing', icon: Sparkles },
   { name: 'Settings', href: '/settings', icon: Settings },
   { name: 'Priority Support', href: '/support', icon: LifeBuoy },
   { name: 'Help', href: '/help', icon: HelpCircle },

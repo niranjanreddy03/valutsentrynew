@@ -199,6 +199,19 @@ export default function RepositoriesPage() {
     fetchRepositories()
   }, [fetchRepositories])
 
+  useEffect(() => {
+    const onFocus = () => fetchRepositories()
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') fetchRepositories()
+    }
+    window.addEventListener('focus', onFocus)
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => {
+      window.removeEventListener('focus', onFocus)
+      document.removeEventListener('visibilitychange', onVisibility)
+    }
+  }, [fetchRepositories])
+
   const handleAddRepository = async () => {
     // Validate required fields
     if (!newRepo.name || !newRepo.url) {

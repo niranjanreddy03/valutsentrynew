@@ -26,7 +26,7 @@ import {
     Target,
     XCircle
 } from 'lucide-react'
-import React, { useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 
 // Extended scan type with repository name
 type ScanWithRepo = Scan & { repository_name?: string }
@@ -69,48 +69,65 @@ export default function ScansPage() {
     critical: ShieldAlert, high: AlertTriangle, medium: Shield, low: CheckCircle,
   }
 
-  useEffect(() => {
-    const fetchData = async () => {
+  const fetchData = useCallback(async () => {
+    try {
       try {
-        // Try fetching real scan data from scanner API first
-        try {
-          const response = await fetch('/api/scans', { headers: getAuthHeaders() })
-          if (response.ok) {
-            const realScans = await response.json()
-            if (realScans && realScans.length > 0) {
-              console.log(`[DETECTION] Loaded ${realScans.length} real scans from scanner API`)
-              setScans(realScans as ScanWithRepo[])
-              setLoading(false)
-              return
-            }
+        const response = await fetch('/api/scans', { cache: 'no-store', headers: getAuthHeaders() })
+        if (response.ok) {
+          const realScans = await response.json()
+          if (realScans && realScans.length > 0) {
+            console.log(`[DETECTION] Loaded ${realScans.length} real scans from scanner API`)
+            setScans(realScans as ScanWithRepo[])
+            setLoading(false)
+            return
           }
-        } catch (apiErr) {
-          console.log('[DETECTION] Scanner API not available, using fallback data')
         }
-
-        // Fallback: demo data or Supabase
-        if (isDemoMode()) {
-          setScans(DEMO_SCANS as unknown as ScanWithRepo[])
-          setRepositories(DEMO_REPOSITORIES as unknown as Repository[])
-          setLoading(false)
-          return
-        }
-
-        const [scansData, reposData] = await Promise.all([
-          scanService.getAll(),
-          repositoryService.getAll()
-        ])
-        setScans(scansData as ScanWithRepo[])
-        setRepositories(reposData)
-      } catch (err) {
-        console.error('Failed to fetch data:', err)
-        toast.error('Failed to load scans')
-      } finally {
-        setLoading(false)
+      } catch (apiErr) {
+        console.log('[DETECTION] Scanner API not available, using fallback data')
       }
+
+      if (isDemoMode()) {
+        setScans(DEMO_SCANS as unknown as ScanWithRepo[])
+        setRepositories(DEMO_REPOSITORIES as unknown as Repository[])
+        setLoading(false)
+        return
+      }
+
+      const [scansData, reposData] = await Promise.all([
+        scanService.getAll(),
+        repositoryService.getAll(),
+      ])
+      setScans(scansData as ScanWithRepo[])
+      setRepositories(reposData)
+    } catch (err) {
+      console.error('Failed to fetch data:', err)
+      toast.error('Failed to load scans')
+    } finally {
+      setLoading(false)
     }
-    fetchData()
   }, [toast])
+
+  useEffect(() => {
+    fetchData()
+  }, [fetchData])
+
+  useEffect(() => {
+    const onFocus = () => fetchData()
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') fetchData()
+    }
+    window.addEventListener('focus', onFocus)
+    document.addEventListener('visibilitychange', onVisibility)
+
+    const hasRunning = scans.some((s) => s.status === 'running' || s.status === 'pending')
+    const interval = hasRunning ? setInterval(fetchData, 4000) : null
+
+    return () => {
+      window.removeEventListener('focus', onFocus)
+      document.removeEventListener('visibilitychange', onVisibility)
+      if (interval) clearInterval(interval)
+    }
+  }, [fetchData, scans])
 
   const filteredScans = scans.filter((scan) => {
     const repoName = scan.repository_name || ''
@@ -281,7 +298,7 @@ export default function ScansPage() {
                   { value: 'failed', label: 'Failed' },
                 ]}
               />
-              <Button variant="secondary" size="sm" onClick={() => setLoading(true)}>
+              <Button variant="secondary" size="sm" onClick={() => { setLoading(true); fetchData() }}>
                 <RefreshCw className="w-4 h-4" />
                 Refresh
               </Button>

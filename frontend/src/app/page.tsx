@@ -13,6 +13,7 @@ import Header from '@/components/layout/Header'
 import Sidebar from '@/components/layout/Sidebar'
 import { Button, Modal, Select } from '@/components/ui'
 import { useAuth } from '@/contexts/AuthContext'
+import { useSubscription } from '@/contexts/SubscriptionContext'
 import { useToast } from '@/contexts/ToastContext'
 import { DEMO_DASHBOARD_DATA, DEMO_REPOSITORIES, isDemoMode } from '@/lib/demoData'
 import { waitForScanCompletion } from '@/lib/pollScan'
@@ -23,13 +24,16 @@ import {
   ArrowRight,
   CheckCircle2,
   Clock,
+  Crown,
   FolderGit2,
   Gauge,
   Loader2,
   Plus,
   Radar,
   ShieldCheck,
+  Sparkles,
   TrendingUp,
+  Zap,
 } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
@@ -192,6 +196,7 @@ export default function Dashboard() {
   const router = useRouter()
   const toast = useToast()
   const { user, supabaseUser, isAuthenticated, isLoading: authLoading } = useAuth()
+  const { status: subscriptionStatus, plans: subscriptionPlans } = useSubscription()
 
   // Time-of-day greeting for the welcome banner.
   const greeting = (() => {
@@ -629,9 +634,57 @@ export default function Dashboard() {
                 {/* Greeting + CTAs */}
                 <div className="lg:col-span-2 min-w-0 flex flex-col justify-between gap-6">
                   <div>
-                    <p className="text-xs font-medium uppercase tracking-[0.2em] text-[var(--text-muted)]">
-                      {todayLabel}
-                    </p>
+                    <div className="flex flex-wrap items-center gap-3">
+                      <p className="text-xs font-medium uppercase tracking-[0.2em] text-[var(--text-muted)]">
+                        {todayLabel}
+                      </p>
+                      {(() => {
+                        const tier = subscriptionStatus?.tier ?? (user?.subscription_tier as string) ?? 'basic'
+                        const display =
+                          subscriptionStatus?.tier_display_name ??
+                          (tier === 'premium_plus'
+                            ? 'Premium Plus'
+                            : tier.charAt(0).toUpperCase() + tier.slice(1))
+                        const planInfo = subscriptionPlans.find((p) => p.tier === tier)
+                        const priceLabel =
+                          planInfo?.price?.label ??
+                          (tier === 'basic'
+                            ? 'Free'
+                            : tier === 'premium'
+                            ? '₹299/month'
+                            : tier === 'premium_plus'
+                            ? '₹999/month'
+                            : '')
+                        const styles =
+                          tier === 'premium_plus'
+                            ? 'border-purple-500/40 bg-purple-500/10 text-purple-300'
+                            : tier === 'premium'
+                            ? 'border-blue-500/40 bg-blue-500/10 text-blue-300'
+                            : 'border-[var(--border-color)] bg-[var(--bg-tertiary)] text-[var(--text-secondary)]'
+                        const Icon = tier === 'premium_plus' ? Crown : tier === 'premium' ? Sparkles : Zap
+                        return (
+                          <button
+                            onClick={() => router.push('/choose-plan')}
+                            className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wider transition-colors hover:opacity-90 ${styles}`}
+                            title="View or upgrade your plan"
+                          >
+                            <Icon className="h-3 w-3" />
+                            <span>{display} Plan</span>
+                            {priceLabel && (
+                              <>
+                                <span className="opacity-50">·</span>
+                                <span className="normal-case tracking-normal">{priceLabel}</span>
+                              </>
+                            )}
+                            {subscriptionStatus?.is_trial && (
+                              <span className="ml-1 rounded-sm bg-amber-500/20 px-1 text-[10px] text-amber-300">
+                                Trial
+                              </span>
+                            )}
+                          </button>
+                        )
+                      })()}
+                    </div>
                     <h1 className="mt-2 text-3xl md:text-4xl font-bold text-[var(--text-primary)] tracking-tight">
                       {greeting}, <span className="bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">{firstName}</span>
                     </h1>

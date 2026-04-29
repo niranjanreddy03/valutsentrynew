@@ -79,6 +79,49 @@ export default function PricingPage() {
     }
   }
 
+  const handleDowngrade = async (tier: SubscriptionTier, planName: string) => {
+    if (!isAuthenticated) {
+      router.push('/login?redirect=/pricing')
+      return
+    }
+    const confirmed = window.confirm(
+      `Switch from your current plan to ${planName}?\n\nYou'll lose access to higher-tier features at the end of your billing period. Continue?`,
+    )
+    if (!confirmed) return
+    setIsUpgrading(true)
+    try {
+      const success = await upgradeTier(tier)
+      if (success) {
+        toast.success(`Plan changed to ${planName}.`)
+        router.push('/')
+      } else {
+        toast.error(error || 'Failed to change plan')
+      }
+    } finally {
+      setIsUpgrading(false)
+    }
+  }
+
+  const handleCancel = async () => {
+    if (!isAuthenticated) return
+    const confirmed = window.confirm(
+      `Cancel your subscription?\n\nYou'll be moved to the Basic (Free) plan and lose access to paid features. This cannot be undone from this screen.`,
+    )
+    if (!confirmed) return
+    setIsUpgrading(true)
+    try {
+      const success = await upgradeTier('basic' as SubscriptionTier)
+      if (success) {
+        toast.success('Subscription cancelled. You are now on the Basic plan.')
+        router.push('/')
+      } else {
+        toast.error(error || 'Failed to cancel subscription')
+      }
+    } finally {
+      setIsUpgrading(false)
+    }
+  }
+
   const handleStartTrial = async () => {
     if (!isAuthenticated) {
       router.push('/login?redirect=/pricing')
@@ -119,7 +162,7 @@ export default function PricingPage() {
           </p>
 
           {isAuthenticated && (
-            <div className="mt-6">
+            <div className="mt-6 flex flex-col items-center gap-3">
               <span className="inline-flex items-center px-4 py-1.5 rounded-full text-sm font-medium border border-[var(--accent)]/40 bg-[var(--accent)]/10 text-[var(--accent)]">
                 Current Plan:{' '}
                 {currentTier === 'premium_plus'
@@ -127,6 +170,15 @@ export default function PricingPage() {
                   : currentTier.charAt(0).toUpperCase() + currentTier.slice(1)}
                 {isTrialActive && ' (Trial)'}
               </span>
+              {currentTier !== 'basic' && (
+                <button
+                  onClick={handleCancel}
+                  disabled={isUpgrading}
+                  className="text-sm font-medium text-red-400 hover:text-red-300 underline-offset-2 hover:underline disabled:opacity-50"
+                >
+                  Cancel subscription
+                </button>
+              )}
             </div>
           )}
 
@@ -278,15 +330,16 @@ export default function PricingPage() {
                       </button>
                     ) : (
                       <button
-                        disabled
-                        className="w-full py-3 px-4 rounded-lg font-semibold cursor-not-allowed"
+                        onClick={() => handleDowngrade(plan.tier as SubscriptionTier, plan.name)}
+                        disabled={isUpgrading}
+                        className="w-full py-3 px-4 rounded-lg font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                         style={{
                           background: 'var(--bg-secondary)',
-                          color: 'var(--text-muted)',
+                          color: 'var(--text-primary)',
                           border: '1px solid var(--border-color)',
                         }}
                       >
-                        Included in Current Plan
+                        {isUpgrading ? 'Processing…' : `Downgrade to ${plan.name}`}
                       </button>
                     )}
                   </div>

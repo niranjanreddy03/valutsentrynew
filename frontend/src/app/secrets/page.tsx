@@ -28,7 +28,7 @@ import {
     ShieldCheck,
     Square
 } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 
 // Extended type with repository_name
 type SecretWithRepo = Secret & { repository_name?: string }
@@ -64,49 +64,61 @@ export default function SecretsPage() {
   const [bulkAction, setBulkAction] = useState<'resolved' | 'ignored' | 'false_positive'>('resolved')
   const toast = useToast()
 
-  useEffect(() => {
-    const fetchSecrets = async () => {
+  const fetchSecrets = useCallback(async () => {
+    try {
       try {
-        // Try fetching real scan results from the scanner API first
-        try {
-          const response = await fetch('/api/secrets', { headers: getAuthHeaders() })
-          if (response.ok) {
-            const realSecrets = await response.json()
-            if (realSecrets && realSecrets.length > 0) {
-              console.log(`[FINDINGS] Loaded ${realSecrets.length} real findings from scanner API`)
-              setSecrets(realSecrets as SecretWithRepo[])
-              setLoading(false)
-              return
-            }
+        const response = await fetch('/api/secrets', { cache: 'no-store', headers: getAuthHeaders() })
+        if (response.ok) {
+          const realSecrets = await response.json()
+          if (realSecrets && realSecrets.length > 0) {
+            console.log(`[FINDINGS] Loaded ${realSecrets.length} real findings from scanner API`)
+            setSecrets(realSecrets as SecretWithRepo[])
+            setLoading(false)
+            return
           }
-        } catch (apiErr) {
-          console.log('[FINDINGS] Scanner API not available, using fallback data')
         }
-
-        // Fallback: demo data or Supabase
-        if (isDemoMode()) {
-          const demoSecrets = DEMO_SECRETS.map(s => ({
-            ...s,
-            type: s.secret_type,
-            risk_level: s.severity,
-            repository_name: s.repository.name,
-          }))
-          setSecrets(demoSecrets as unknown as SecretWithRepo[])
-          setLoading(false)
-          return
-        }
-
-        const data = await secretService.getAll()
-        setSecrets(data as SecretWithRepo[])
-      } catch (err) {
-        console.error('Failed to fetch secrets:', err)
-        toast.error('Failed to load secrets')
-      } finally {
-        setLoading(false)
+      } catch (apiErr) {
+        console.log('[FINDINGS] Scanner API not available, using fallback data')
       }
+
+      if (isDemoMode()) {
+        const demoSecrets = DEMO_SECRETS.map(s => ({
+          ...s,
+          type: s.secret_type,
+          risk_level: s.severity,
+          repository_name: s.repository.name,
+        }))
+        setSecrets(demoSecrets as unknown as SecretWithRepo[])
+        setLoading(false)
+        return
+      }
+
+      const data = await secretService.getAll()
+      setSecrets(data as SecretWithRepo[])
+    } catch (err) {
+      console.error('Failed to fetch secrets:', err)
+      toast.error('Failed to load secrets')
+    } finally {
+      setLoading(false)
     }
-    fetchSecrets()
   }, [toast])
+
+  useEffect(() => {
+    fetchSecrets()
+  }, [fetchSecrets])
+
+  useEffect(() => {
+    const onFocus = () => fetchSecrets()
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') fetchSecrets()
+    }
+    window.addEventListener('focus', onFocus)
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => {
+      window.removeEventListener('focus', onFocus)
+      document.removeEventListener('visibilitychange', onVisibility)
+    }
+  }, [fetchSecrets])
 
   const filteredSecrets = secrets.filter((secret) => {
     const repoName = secret.repository_name || ''
