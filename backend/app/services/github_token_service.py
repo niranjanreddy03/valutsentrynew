@@ -10,7 +10,9 @@ SECURITY REQUIREMENTS:
 """
 
 import asyncio
+import json
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Dict, Any, Optional, List, Tuple
 from dataclasses import dataclass
 from enum import Enum
@@ -67,9 +69,113 @@ class SecureGitHubService:
     
     # Rate limiting for GitHub API calls per user
     _rate_limit_cache: Dict[str, Tuple[int, datetime]] = {}
+    _local_store_path = Path(__file__).resolve().parents[2] / ".github_tokens.json"
     
     def __init__(self):
         self.logger = logger.bind(module="secure_github")
+
+    def _read_local_store(self) -> Dict[str, Any]:
+        """Read the local encrypted token store used when Supabase cannot write."""
+        try:
+            if not self._local_store_path.exists():
+                return {}
+            return json.loads(self._local_store_path.read_text(encoding="utf-8"))
+        except Exception as e:
+            self.logger.warning(f"[GITHUB] Failed to read local token store: {type(e).__name__}")
+            return {}
+
+    def _write_local_store(self, data: Dict[str, Any]) -> None:
+        """Write the local encrypted token store with restrictive best-effort perms."""
+        self._local_store_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+    async def _supabase_update_user(
+        self,
+        user_id: str,
+        payload: Dict[str, Any],
+        user_jwt: Optional[str] = None,
+        user_email: Optional[str] = None,
+    ) -> Tuple[bool, Optional[str]]:
+        """
+        Update a Supabase user row.
+
+        When a Supabase access token is supplied, PostgREST enforces RLS so the
+        user can only update their own row. If the profile row is missing, create
+        it and retry the update.
+        """
+        if not settings.SUPABASE_URL or not settings.SUPABASE_KEY:
+            return False, "Supabase is not configured"
+
+        base_url = settings.SUPABASE_URL.rstrip("/")
+        headers = {
+            "apikey": settings.SUPABASE_KEY,
+            "Authorization": f"Bearer {user_jwt or settings.SUPABASE_KEY}",
+            "Content-Type": "application/json",
+            "Prefer": "return=representation",
+        }
+
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            update_url = f"{base_url}/rest/v1/users"
+            params = {"id": f"eq.{user_id}"}
+            response = await client.patch(update_url, headers=headers, params=params, json=payload)
+
+            if response.status_code in (200, 204):
+                data = response.json() if response.content else []
+                if data:
+                    return True, None
+
+                # Supabase profile may not exist yet if the auth trigger failed.
+                if user_jwt and user_email:
+                    insert_payload = {
+                        "id": user_id,
+                        "email": user_email,
+                        "subscription_tier": "basic",
+                        "subscription_started_at": datetime.now(timezone.utc).isoformat(),
+                    }
+                    insert_response = await client.post(
+                        update_url,
+                        headers=headers,
+                        json={**insert_payload, **payload},
+                    )
+                    if insert_response.status_code in (200, 201):
+                        return True, None
+                    return False, f"Failed to create Supabase user profile ({insert_response.status_code})"
+
+                return False, "Supabase user profile not found"
+
+            if response.status_code in (401, 403):
+                return False, "Not authorized to update this user profile"
+
+            return False, f"Supabase update failed ({response.status_code})"
+
+    async def _supabase_select_user(
+        self,
+        user_id: str,
+        columns: str,
+        user_jwt: Optional[str] = None,
+    ) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+        """Select a Supabase user row using either service credentials or user RLS."""
+        if not settings.SUPABASE_URL or not settings.SUPABASE_KEY:
+            return None, "Supabase is not configured"
+
+        base_url = settings.SUPABASE_URL.rstrip("/")
+        headers = {
+            "apikey": settings.SUPABASE_KEY,
+            "Authorization": f"Bearer {user_jwt or settings.SUPABASE_KEY}",
+        }
+
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            response = await client.get(
+                f"{base_url}/rest/v1/users",
+                headers=headers,
+                params={"id": f"eq.{user_id}", "select": columns, "limit": "1"},
+            )
+
+        if response.status_code == 200:
+            data = response.json()
+            return (data[0] if data else None), None
+        if response.status_code in (401, 403):
+            return None, "Not authorized to read this user profile"
+        return None, f"Supabase select failed ({response.status_code})"
     
     async def validate_token(self, token: str) -> TokenValidationResult:
         """
@@ -342,7 +448,9 @@ class SecureGitHubService:
         self,
         user_id: str,
         token: str,
-        github_username: str
+        github_username: str,
+        user_jwt: Optional[str] = None,
+        user_email: Optional[str] = None,
     ) -> Tuple[bool, Optional[str]]:
         """
         Encrypt and store a GitHub token for a user.
@@ -352,36 +460,65 @@ class SecureGitHubService:
             - Original token is never stored
             - Token hash stored for lookup without decryption
         """
-        if not is_supabase_configured():
-            return False, "Database not configured"
-        
         try:
-            # Encrypt the token
-            encrypted_token = token_encryption.encrypt(token)
+            # Encrypt the token, binding it to the owning user_id as AAD so a
+            # stolen ciphertext cannot be replayed onto another user's row.
+            encrypted_token = token_encryption.encrypt(token, context=str(user_id))
             token_hash = token_encryption.hash_token(token)
-            
-            supabase = get_supabase_client()
-            
-            # Store encrypted token with metadata
-            result = supabase.table('users').update({
+            now = datetime.now(timezone.utc).isoformat()
+            payload = {
                 'github_token': encrypted_token,
                 'github_username': github_username,
                 'github_token_hash': token_hash,
-                'github_token_added_at': datetime.now(timezone.utc).isoformat(),
-                'updated_at': datetime.now(timezone.utc).isoformat()
-            }).eq('id', user_id).execute()
+                'github_token_added_at': now,
+                'updated_at': now
+            }
+
+            if is_supabase_configured() and user_jwt:
+                success, error = await self._supabase_update_user(
+                    user_id=user_id,
+                    payload=payload,
+                    user_jwt=user_jwt,
+                    user_email=user_email,
+                )
+                if success:
+                    self.logger.info(f"[GITHUB] Encrypted token stored in Supabase for user {user_id}")
+                    return True, None
+                if error and "Not authorized" in error:
+                    return False, error
             
-            if result.data:
-                self.logger.info(f"[GITHUB] Encrypted token stored for user {user_id}")
-                return True, None
+            if is_supabase_configured():
+                supabase = get_supabase_client()
+                
+                # Store encrypted token with metadata
+                result = supabase.table('users').update(payload).eq('id', user_id).execute()
+                
+                if result.data:
+                    self.logger.info(f"[GITHUB] Encrypted token stored for user {user_id}")
+                    return True, None
             
-            return False, "Failed to store token"
+            # Local development fallback. The token remains encrypted with the
+            # backend SECRET_KEY and the file is ignored by git.
+            store = self._read_local_store()
+            store[user_id] = {
+                "github_token": encrypted_token,
+                "github_username": github_username,
+                "github_token_hash": token_hash,
+                "github_token_added_at": now,
+            }
+            self._write_local_store(store)
+            self.logger.info(f"[GITHUB] Encrypted token stored in local dev store for user {user_id}")
+            return True, None
             
         except Exception as e:
             self.logger.error(f"[GITHUB] Store token error: {type(e).__name__}")
             return False, "Failed to store token securely"
     
-    async def get_decrypted_token(self, user_id: str) -> Tuple[Optional[str], Optional[str]]:
+    async def get_decrypted_token(
+        self,
+        user_id: str,
+        user_jwt: Optional[str] = None,
+    ) -> Tuple[Optional[str], Optional[str]]:
         """
         Retrieve and decrypt a user's GitHub token.
         
@@ -392,21 +529,38 @@ class SecureGitHubService:
         Returns:
             Tuple of (token, error_message)
         """
-        if not is_supabase_configured():
-            return None, "Database not configured"
-        
         try:
-            supabase = get_supabase_client()
-            
-            result = supabase.table('users').select(
-                'github_token, github_username'
-            ).eq('id', user_id).single().execute()
-            
-            if not result.data or not result.data.get('github_token'):
+            row = None
+
+            if is_supabase_configured() and user_jwt:
+                row, error = await self._supabase_select_user(
+                    user_id=user_id,
+                    columns="github_token,github_username",
+                    user_jwt=user_jwt,
+                )
+                if error and "Not authorized" in error:
+                    return None, error
+
+            if row is None and is_supabase_configured():
+                try:
+                    supabase = get_supabase_client()
+                    result = supabase.table('users').select(
+                        'github_token, github_username'
+                    ).eq('id', user_id).single().execute()
+                    row = result.data
+                except Exception:
+                    row = None
+
+            if row is None:
+                row = self._read_local_store().get(user_id)
+
+            if not row or not row.get('github_token'):
                 return None, "No GitHub token configured"
             
-            # Decrypt the token
-            decrypted = token_encryption.decrypt(result.data['github_token'])
+            # Decrypt with the same user_id AAD that was bound at encrypt time.
+            # Legacy (pre-v2) blobs decrypt without AAD via the version check
+            # inside TokenEncryption.decrypt.
+            decrypted = token_encryption.decrypt(row['github_token'], context=str(user_id))
             return decrypted, None
             
         except ValueError as e:
@@ -417,7 +571,11 @@ class SecureGitHubService:
             self.logger.error(f"[GITHUB] Get token error: {type(e).__name__}")
             return None, "Failed to retrieve token"
     
-    async def revoke_token(self, user_id: str) -> Tuple[bool, Optional[str]]:
+    async def revoke_token(
+        self,
+        user_id: str,
+        user_jwt: Optional[str] = None,
+    ) -> Tuple[bool, Optional[str]]:
         """
         Revoke/delete a user's stored GitHub token.
         
@@ -425,57 +583,91 @@ class SecureGitHubService:
             - Completely removes encrypted token from storage
             - Logs the revocation for audit trail
         """
-        if not is_supabase_configured():
-            return False, "Database not configured"
-        
         try:
-            supabase = get_supabase_client()
-            
-            result = supabase.table('users').update({
+            payload = {
                 'github_token': None,
                 'github_username': None,
                 'github_token_hash': None,
                 'github_token_added_at': None,
                 'github_token_revoked_at': datetime.now(timezone.utc).isoformat(),
                 'updated_at': datetime.now(timezone.utc).isoformat()
-            }).eq('id', user_id).execute()
-            
-            if result.data:
-                self.logger.info(f"[GITHUB] Token revoked for user {user_id}")
-                return True, None
-            
-            return False, "Failed to revoke token"
+            }
+
+            if is_supabase_configured() and user_jwt:
+                success, error = await self._supabase_update_user(
+                    user_id=user_id,
+                    payload=payload,
+                    user_jwt=user_jwt,
+                )
+                if success:
+                    self.logger.info(f"[GITHUB] Token revoked in Supabase for user {user_id}")
+                    return True, None
+                if error and "Not authorized" in error:
+                    return False, error
+
+            if is_supabase_configured():
+                supabase = get_supabase_client()
+                result = supabase.table('users').update(payload).eq('id', user_id).execute()
+                if result.data:
+                    self.logger.info(f"[GITHUB] Token revoked for user {user_id}")
+                    return True, None
+
+            store = self._read_local_store()
+            if user_id in store:
+                del store[user_id]
+                self._write_local_store(store)
+            self.logger.info(f"[GITHUB] Token revoked in local dev store for user {user_id}")
+            return True, None
             
         except Exception as e:
             self.logger.error(f"[GITHUB] Revoke token error: {type(e).__name__}")
             return False, "Failed to revoke token"
     
-    async def get_token_status(self, user_id: str) -> Dict[str, Any]:
+    async def get_token_status(
+        self,
+        user_id: str,
+        user_jwt: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """
         Get token status for a user without exposing the token.
         
         Returns:
             Dict with token status info (no sensitive data)
         """
-        if not is_supabase_configured():
-            return {"configured": False, "error": "Database not configured"}
-        
         try:
-            supabase = get_supabase_client()
-            
-            result = supabase.table('users').select(
-                'github_username, github_token_added_at'
-            ).eq('id', user_id).single().execute()
-            
-            if not result.data:
+            row = None
+
+            if is_supabase_configured() and user_jwt:
+                row, error = await self._supabase_select_user(
+                    user_id=user_id,
+                    columns="github_username,github_token_added_at",
+                    user_jwt=user_jwt,
+                )
+                if error and "Not authorized" in error:
+                    return {"configured": False, "error": error}
+
+            if row is None and is_supabase_configured():
+                try:
+                    supabase = get_supabase_client()
+                    result = supabase.table('users').select(
+                        'github_username, github_token_added_at'
+                    ).eq('id', user_id).single().execute()
+                    row = result.data
+                except Exception:
+                    row = None
+
+            if row is None:
+                row = self._read_local_store().get(user_id)
+
+            if not row:
                 return {"configured": False}
             
-            has_token = bool(result.data.get('github_token_added_at'))
+            has_token = bool(row.get('github_token_added_at'))
             
             return {
                 "configured": has_token,
-                "github_username": result.data.get('github_username') if has_token else None,
-                "added_at": result.data.get('github_token_added_at') if has_token else None,
+                "github_username": row.get('github_username') if has_token else None,
+                "added_at": row.get('github_token_added_at') if has_token else None,
                 # Never include the actual token
             }
             

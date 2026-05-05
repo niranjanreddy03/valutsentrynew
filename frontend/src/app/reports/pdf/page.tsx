@@ -27,6 +27,7 @@ interface RawReport {
   findings: Array<{
     id: number
     repository: string
+    repository_url?: string
     type: string
     severity: string
     file: string
@@ -69,10 +70,27 @@ export default function PDFReportPage() {
     if (!raw) return null
     if (!repoFilter) return raw
 
-    const target = decodeURIComponent(repoFilter).toLowerCase()
-    const repos = raw.repositories.filter((r) => r.name.toLowerCase() === target)
-    const scans = raw.scans.filter((s) => s.repository.toLowerCase() === target)
-    const findings = raw.findings.filter((f) => f.repository.toLowerCase() === target)
+    const decoded = decodeURIComponent(repoFilter)
+    const isUrl = /^https?:\/\//i.test(decoded) || decoded.startsWith('git@')
+    const norm = (u: string) =>
+      (u || '').trim().toLowerCase().replace(/\.git$/, '').replace(/\/+$/, '')
+    const targetUrl = isUrl ? norm(decoded) : ''
+    const targetName = decoded.toLowerCase()
+
+    const matchRepoByUrl = (url?: string) => isUrl && norm(url || '') === targetUrl
+    const matchRepoByName = (name: string) => !isUrl && name.toLowerCase() === targetName
+
+    const repos = raw.repositories.filter(
+      (r) => matchRepoByUrl(r.url) || matchRepoByName(r.name),
+    )
+    const matchedNames = new Set(repos.map((r) => r.name.toLowerCase()))
+    const matchedUrls = new Set(repos.map((r) => norm(r.url)))
+    const scans = raw.scans.filter((s) => matchedNames.has(s.repository.toLowerCase()))
+    const findings = raw.findings.filter(
+      (f) =>
+        matchedNames.has(f.repository.toLowerCase()) ||
+        (f.repository_url && matchedUrls.has(norm(f.repository_url))),
+    )
 
     const by_severity = { critical: 0, high: 0, medium: 0, low: 0 }
     for (const f of findings) {
@@ -137,8 +155,10 @@ export default function PDFReportPage() {
       ? '#a16207'
       : '#047857'
 
-  const target = repoFilter ? decodeURIComponent(repoFilter) : null
   const firstRepo = report.repositories[0]
+  const target = repoFilter
+    ? firstRepo?.name || decodeURIComponent(repoFilter)
+    : null
   const generated = new Date(report.generated_at)
 
   // Top offending files (group findings by file, sorted by weighted severity)

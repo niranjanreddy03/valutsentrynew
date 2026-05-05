@@ -1,11 +1,27 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { Copy, Check, ShieldCheck, ArrowLeft, Smartphone, Download, Loader2 } from 'lucide-react'
+import {
+  Copy,
+  Check,
+  ShieldCheck,
+  ArrowLeft,
+  Smartphone,
+  Download,
+  Loader2,
+  RefreshCw,
+} from 'lucide-react'
 import { useToast } from '@/contexts/ToastContext'
+import { useAuth } from '@/contexts/AuthContext'
 import { supabase } from '@/services/supabase'
+import {
+  buildOtpAuthUri,
+  generateTotpSecret,
+  saveLocalMfaFactor,
+  verifyTotpCode,
+} from '@/lib/localMfa'
 import {
   AuthLayout,
   AuthCard,
@@ -15,11 +31,13 @@ import {
 } from '@/components/auth'
 
 /**
- * MFA setup — 3-step flow backed by Supabase Auth MFA (TOTP):
- *   1. Scan QR (or copy secret) from supabase.auth.mfa.enroll().
- *   2. Challenge + verify the 6-digit code against Supabase.
- *   3. Show locally-generated recovery codes (display only — Supabase
- *      does not issue recovery codes for TOTP factors today).
+ * MFA setup — 3-step flow:
+ *   1. Scan: enroll a TOTP factor and show QR / setup key.
+ *   2. Verify: challenge + verify the 6-digit code.
+ *   3. Recovery: show locally-generated recovery codes.
+ *
+ * Backed by Supabase Auth MFA when a real session exists, otherwise falls
+ * back to a localStorage TOTP factor for the no-Supabase dev path.
  */
 
 type Step = 'scan' | 'verify' | 'recovery'
@@ -35,108 +53,165 @@ function generateRecoveryCodes() {
   return codes
 }
 
+function toQrImageSrc(qrCode: string) {
+  const trimmed = (qrCode || '').trim()
+  if (!trimmed) return ''
+  if (trimmed.startsWith('<svg')) {
+    return `data:image/svg+xml;utf8,${encodeURIComponent(trimmed)}`
+  }
+  return trimmed
+}
+
+interface EnrollmentResult {
+  factorId: string
+  secret: string
+  qr: string
+  otpAuthUri: string
+  isLocal: boolean
+}
+
 export default function MfaSetupPage() {
   const router = useRouter()
   const { showToast } = useToast()
+  const { user, supabaseUser, isLoading: authLoading } = useAuth()
 
   const [step, setStep] = useState<Step>('scan')
   const [code, setCode] = useState('')
   const [error, setError] = useState<string | null>(null)
-  const [loading, setLoading] = useState(false)
+  const [verifying, setVerifying] = useState(false)
   const [copied, setCopied] = useState(false)
   const [copiedAll, setCopiedAll] = useState(false)
 
-  // Supabase MFA enrollment state
-  const [factorId, setFactorId] = useState<string | null>(null)
-  const [secret, setSecret] = useState<string>('')
-  const [qrSvg, setQrSvg] = useState<string>('')
+  const [enrollment, setEnrollment] = useState<EnrollmentResult | null>(null)
   const [enrollError, setEnrollError] = useState<string | null>(null)
   const [enrolling, setEnrolling] = useState(true)
+  const [enrollAttempt, setEnrollAttempt] = useState(0)
 
   const recoveryCodes = useMemo(() => generateRecoveryCodes(), [])
 
-  // Enroll a TOTP factor on mount
+  // Refs for latest auth values without making them effect deps.
+  const userRef = useRef(user)
+  const supabaseUserRef = useRef(supabaseUser)
   useEffect(() => {
-    let cancelled = false
-    const enroll = async () => {
+    userRef.current = user
+    supabaseUserRef.current = supabaseUser
+  }, [user, supabaseUser])
+
+  // Run enrollment exactly once per attempt — only when auth is settled.
+  // We deliberately do NOT include user/session in deps because
+  // MFA_CHALLENGE_VERIFIED fires after a successful verify and would
+  // otherwise re-trigger this effect, wiping the just-enrolled factor.
+  useEffect(() => {
+    if (authLoading) return
+
+    let aborted = false
+
+    const run = async () => {
       setEnrolling(true)
       setEnrollError(null)
       try {
-        // If there's already an unverified factor for this user, unenroll it first
-        // so we don't hit "factor already exists" errors.
-        const listed = await supabase.auth.mfa.listFactors()
-        const existing = listed.data?.totp?.find((f: any) => f.status !== 'verified')
-        if (existing) {
-          await supabase.auth.mfa.unenroll({ factorId: existing.id })
-        }
-
-        const { data, error } = await supabase.auth.mfa.enroll({
-          factorType: 'totp',
-          friendlyName: `VaultSentry · ${new Date().toLocaleDateString()}`,
-        })
-        if (error) throw error
-        if (cancelled) return
-
-        setFactorId(data.id)
-        setSecret(data.totp.secret)
-        setQrSvg(data.totp.qr_code)
+        const result = await performEnrollment(userRef.current, supabaseUserRef.current)
+        if (aborted) return
+        setEnrollment(result)
       } catch (err: any) {
-        if (!cancelled) {
+        console.error('[MFA SETUP] enrollment failed:', err)
+        if (!aborted) {
           setEnrollError(err?.message || 'Could not start MFA enrollment.')
           showToast(err?.message || 'Could not start MFA enrollment.', 'error')
         }
       } finally {
-        if (!cancelled) setEnrolling(false)
+        if (!aborted) setEnrolling(false)
       }
     }
-    enroll()
-    return () => {
-      cancelled = true
-    }
-  }, [showToast])
 
-  const currentIndex = step === 'scan' ? 0 : step === 'verify' ? 1 : 2
+    run()
+    return () => {
+      aborted = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authLoading, enrollAttempt])
+
+  const verifyingRef = useRef(false)
+  const handleVerify = async (value?: string) => {
+    const v = (value ?? code).trim()
+    if (v.length !== 6) return
+    if (!enrollment) {
+      setError('Enrollment was not started. Please reload the page.')
+      return
+    }
+    // Prevent concurrent calls (OtpInput.onComplete + button click race).
+    if (verifyingRef.current) return
+    verifyingRef.current = true
+
+    console.log('[MFA SETUP] verify start, factorId:', enrollment.factorId, 'isLocal:', enrollment.isLocal)
+    setError(null)
+    setVerifying(true)
+    try {
+      if (enrollment.isLocal) {
+        const valid = await verifyTotpCode(enrollment.secret, v)
+        if (!valid) throw new Error('Invalid code. Please try again.')
+
+        const userId = userRef.current?.id || supabaseUserRef.current?.id
+        if (!userId) throw new Error('Local user not found. Please sign in again.')
+        saveLocalMfaFactor(userId, {
+          secret: enrollment.secret,
+          issuer: 'VaultSentry',
+          accountName:
+            userRef.current?.email || supabaseUserRef.current?.email || 'local-user',
+          verifiedAt: new Date().toISOString(),
+        })
+      } else {
+        const withTimeout = <T,>(p: Promise<T>, ms: number, label: string): Promise<T> =>
+          Promise.race([
+            p,
+            new Promise<T>((_, reject) =>
+              setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms),
+            ),
+          ])
+
+        console.log('[MFA SETUP] calling mfa.challenge…')
+        const { data: challenge, error: challengeErr } = await withTimeout(
+          supabase.auth.mfa.challenge({ factorId: enrollment.factorId }),
+          15_000,
+          'mfa.challenge',
+        )
+        if (challengeErr) throw challengeErr
+        if (!challenge) throw new Error('Challenge returned no data.')
+        console.log('[MFA SETUP] challenge ok, id:', challenge.id, 'calling mfa.verify…')
+
+        const { error: verifyErr } = await withTimeout(
+          supabase.auth.mfa.verify({
+            factorId: enrollment.factorId,
+            challengeId: challenge.id,
+            code: v,
+          }),
+          15_000,
+          'mfa.verify',
+        )
+        if (verifyErr) throw verifyErr
+        console.log('[MFA SETUP] verify ok')
+      }
+
+      showToast('Two-factor authentication enabled', 'success')
+      setStep('recovery')
+    } catch (err: any) {
+      console.error('[MFA SETUP] verify failed:', err)
+      setError(err?.message || 'Invalid code. Please try again.')
+      setCode('')
+    } finally {
+      verifyingRef.current = false
+      setVerifying(false)
+    }
+  }
 
   const copySecret = async () => {
-    if (!secret) return
+    if (!enrollment?.secret) return
     try {
-      await navigator.clipboard.writeText(secret)
+      await navigator.clipboard.writeText(enrollment.secret)
       setCopied(true)
       setTimeout(() => setCopied(false), 1500)
     } catch {
       showToast('Could not copy secret', 'error')
-    }
-  }
-
-  const handleVerify = async (value?: string) => {
-    const v = value ?? code
-    if (v.length !== 6) return
-    if (!factorId) {
-      setError('Enrollment was not started. Please reload the page.')
-      return
-    }
-    setError(null)
-    setLoading(true)
-    try {
-      const { data: challenge, error: challengeErr } = await supabase.auth.mfa.challenge({
-        factorId,
-      })
-      if (challengeErr) throw challengeErr
-
-      const { error: verifyErr } = await supabase.auth.mfa.verify({
-        factorId,
-        challengeId: challenge.id,
-        code: v,
-      })
-      if (verifyErr) throw verifyErr
-
-      setStep('recovery')
-      showToast('Two-factor authentication enabled', 'success')
-    } catch (err: any) {
-      setError(err?.message || 'Invalid code. Please try again.')
-      setCode('')
-    } finally {
-      setLoading(false)
     }
   }
 
@@ -164,9 +239,20 @@ export default function MfaSetupPage() {
     router.push('/settings')
   }
 
+  const retryEnrollment = () => {
+    setEnrollment(null)
+    setEnrollAttempt((n) => n + 1)
+  }
+
   useEffect(() => {
     if (step === 'verify') setCode('')
   }, [step])
+
+  const currentIndex = step === 'scan' ? 0 : step === 'verify' ? 1 : 2
+  const qrSrc = enrollment?.qr ? toQrImageSrc(enrollment.qr) : ''
+  const formattedSecret = enrollment?.secret
+    ? enrollment.secret.match(/.{1,4}/g)?.join(' ')
+    : null
 
   return (
     <AuthLayout>
@@ -196,20 +282,32 @@ export default function MfaSetupPage() {
               <div className="flex h-[204px] w-[204px] items-center justify-center rounded-lg bg-white p-3 shadow-glow-sm">
                 {enrolling ? (
                   <Loader2 className="h-8 w-8 animate-spin text-slate-500" />
-                ) : qrSvg ? (
-                  // Supabase returns `qr_code` as a data URL (data:image/svg+xml;...)
+                ) : qrSrc ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
-                    src={qrSvg}
+                    src={qrSrc}
                     alt="Scan this QR code with your authenticator app"
                     width={180}
                     height={180}
                     className="h-[180px] w-[180px]"
                   />
-                ) : (
+                ) : enrollment?.otpAuthUri ? (
                   <p className="px-3 text-center text-xs text-slate-500">
-                    {enrollError || 'QR unavailable'}
+                    Use the setup key below
                   </p>
+                ) : (
+                  <div className="flex flex-col items-center gap-2 px-3 text-center">
+                    <p className="text-xs text-slate-500">
+                      {enrollError || 'QR unavailable'}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={retryEnrollment}
+                      className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 px-2 py-1 text-xs text-slate-600 hover:bg-slate-50"
+                    >
+                      <RefreshCw className="h-3 w-3" /> Retry
+                    </button>
+                  </div>
                 )}
               </div>
               <div className="inline-flex items-center gap-2 text-xs text-slate-400">
@@ -218,21 +316,36 @@ export default function MfaSetupPage() {
               </div>
             </div>
 
+            {enrollment?.otpAuthUri && (
+              <div>
+                <p className="mb-1.5 text-xs font-medium text-slate-400">
+                  Authenticator setup URI:
+                </p>
+                <code className="block break-all rounded-xl border border-white/10 bg-slate-900/70 px-3 py-2 font-mono text-[11px] leading-relaxed text-slate-300">
+                  {enrollment.otpAuthUri}
+                </code>
+              </div>
+            )}
+
             <div>
               <p className="mb-1.5 text-xs font-medium text-slate-400">
-                Can’t scan? Enter this key manually:
+                Can&rsquo;t scan? Enter this key manually:
               </p>
               <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-slate-900/70 px-3 py-2">
                 <code className="flex-1 truncate font-mono text-xs text-cyber-cyan">
-                  {secret ? secret.match(/.{1,4}/g)?.join(' ') : enrolling ? 'Generating…' : '—'}
+                  {formattedSecret ?? (enrolling ? 'Generating…' : '—')}
                 </code>
                 <button
                   type="button"
                   onClick={copySecret}
-                  disabled={!secret}
+                  disabled={!enrollment?.secret}
                   className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-slate-300 transition-colors hover:bg-white/5 disabled:opacity-40"
                 >
-                  {copied ? <Check className="h-3.5 w-3.5 text-cyber-green" /> : <Copy className="h-3.5 w-3.5" />}
+                  {copied ? (
+                    <Check className="h-3.5 w-3.5 text-cyber-green" />
+                  ) : (
+                    <Copy className="h-3.5 w-3.5" />
+                  )}
                   {copied ? 'Copied' : 'Copy'}
                 </button>
               </div>
@@ -247,9 +360,9 @@ export default function MfaSetupPage() {
             <AuthButton
               type="button"
               onClick={() => setStep('verify')}
-              disabled={enrolling || !factorId}
+              disabled={enrolling || !enrollment}
             >
-              I’ve added it — continue
+              I&rsquo;ve added it &mdash; continue
             </AuthButton>
             <Link
               href="/settings"
@@ -267,7 +380,7 @@ export default function MfaSetupPage() {
               onChange={setCode}
               onComplete={(v) => handleVerify(v)}
               error={!!error}
-              disabled={loading}
+              disabled={verifying}
             />
             {error && (
               <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-300">
@@ -276,7 +389,7 @@ export default function MfaSetupPage() {
             )}
             <AuthButton
               type="button"
-              loading={loading}
+              loading={verifying}
               disabled={code.length !== 6}
               onClick={() => handleVerify()}
             >
@@ -297,8 +410,8 @@ export default function MfaSetupPage() {
             <div className="flex items-start gap-3 rounded-xl border border-cyber-cyan/20 bg-cyber-cyan/5 p-3.5">
               <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-cyber-cyan" />
               <p className="text-xs leading-relaxed text-slate-300">
-                Each code can be used <strong className="text-white">once</strong>. Store them in
-                a password manager or print them out.
+                Each code can be used <strong className="text-white">once</strong>. Store
+                them in a password manager or print them out.
               </p>
             </div>
 
@@ -311,9 +424,18 @@ export default function MfaSetupPage() {
             </div>
 
             <div className="grid grid-cols-2 gap-2.5">
-              <AuthButton type="button" variant="secondary" onClick={copyAllCodes} leadingIcon={
-                copiedAll ? <Check className="h-4 w-4 text-cyber-green" /> : <Copy className="h-4 w-4" />
-              }>
+              <AuthButton
+                type="button"
+                variant="secondary"
+                onClick={copyAllCodes}
+                leadingIcon={
+                  copiedAll ? (
+                    <Check className="h-4 w-4 text-cyber-green" />
+                  ) : (
+                    <Copy className="h-4 w-4" />
+                  )
+                }
+              >
                 {copiedAll ? 'Copied' : 'Copy all'}
               </AuthButton>
               <AuthButton
@@ -327,11 +449,74 @@ export default function MfaSetupPage() {
             </div>
 
             <AuthButton type="button" onClick={handleDone}>
-              I’ve saved them — finish
+              I&rsquo;ve saved them &mdash; finish
             </AuthButton>
           </div>
         )}
       </AuthCard>
     </AuthLayout>
   )
+}
+
+/**
+ * Performs an MFA enrollment end-to-end:
+ *   1. If there is no Supabase session but we have a local user, do a local
+ *      TOTP enrollment (dev fallback).
+ *   2. Otherwise, list & unenroll any existing factors so we never collide on
+ *      friendly_name, then call mfa.enroll() and return the QR + secret.
+ *
+ * This is a plain async function (not inside an effect closure) so React's
+ * strict-mode double-invocation can't cancel it midway and leave state empty.
+ */
+async function performEnrollment(
+  user: { id?: string; email?: string } | null,
+  supabaseUser: { id?: string; email?: string } | null,
+): Promise<EnrollmentResult> {
+  const { data: sessionData } = await supabase.auth.getSession()
+  const activeSession = sessionData.session
+
+  // Local-only fallback: no Supabase session but we have a local user.
+  if (!activeSession && (user || supabaseUser)) {
+    const accountName = user?.email || supabaseUser?.email || 'local-user'
+    const localSecret = generateTotpSecret()
+    return {
+      factorId: `local:${user?.id || supabaseUser?.id || accountName}`,
+      secret: localSecret,
+      qr: '',
+      otpAuthUri: buildOtpAuthUri(localSecret, accountName),
+      isLocal: true,
+    }
+  }
+
+  if (!activeSession) {
+    throw new Error('No active session. Please sign in again.')
+  }
+
+  // Clean slate: remove any pre-existing factors so enroll() can't fail on
+  // the unique (user_id, friendly_name) constraint.
+  try {
+    const listed = await supabase.auth.mfa.listFactors()
+    const factors = listed.data?.totp ?? []
+    for (const f of factors) {
+      await supabase.auth.mfa.unenroll({ factorId: f.id }).catch(() => {})
+    }
+  } catch (err) {
+    console.warn('[MFA SETUP] listFactors/unenroll cleanup failed:', err)
+  }
+
+  const friendlyName = `VaultSentry · ${new Date().toLocaleDateString()} · ${Date.now()}`
+  const { data, error } = await supabase.auth.mfa.enroll({
+    factorType: 'totp',
+    friendlyName,
+  })
+  if (error) throw error
+  if (!data) throw new Error('Enrollment returned no data.')
+
+  return {
+    factorId: data.id,
+    secret: data.totp.secret,
+    qr: data.totp.qr_code,
+    otpAuthUri: data.totp.uri || '',
+    isLocal: false,
+  }
 }

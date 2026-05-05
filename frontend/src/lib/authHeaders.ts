@@ -3,6 +3,8 @@
  * This ensures per-user data isolation in the backend.
  */
 export function getAuthHeaders(): Record<string, string> {
+  const headers: Record<string, string> = {}
+
   // Check for demo mode user
   if (typeof window !== 'undefined') {
     const isDemoMode = localStorage.getItem('demo_mode') === 'true'
@@ -25,10 +27,16 @@ export function getAuthHeaders(): Record<string, string> {
         const raw = localStorage.getItem(supabaseKey)
         if (raw) {
           const parsed = JSON.parse(raw)
-          const user = parsed?.user || parsed?.currentSession?.user
+          const session = parsed?.currentSession || parsed?.session || parsed
+          const user = parsed?.user || session?.user
           const userId = user?.id
+          const accessToken = session?.access_token
+          if (accessToken) {
+            headers.Authorization = `Bearer ${accessToken}`
+          }
           if (userId) {
             return {
+              ...headers,
               'x-user-id': userId,
               'x-user-email': user?.email || '',
               'x-user-name': user?.user_metadata?.full_name || user?.email?.split('@')[0] || '',
@@ -41,5 +49,5 @@ export function getAuthHeaders(): Record<string, string> {
     }
   }
 
-  return { 'x-user-id': 'local-user' }
+  return { ...headers, 'x-user-id': 'local-user' }
 }

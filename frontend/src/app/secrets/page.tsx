@@ -20,6 +20,7 @@ import {
     EyeOff,
     FileText,
     Flag,
+    FolderGit2,
     KeyRound,
     RefreshCw,
     Search,
@@ -28,10 +29,14 @@ import {
     ShieldCheck,
     Square
 } from 'lucide-react'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useSearchParams, useRouter } from 'next/navigation'
 
 // Extended type with repository_name
-type SecretWithRepo = Secret & { repository_name?: string }
+type SecretWithRepo = Secret & { repository_name?: string; repository_url?: string }
+
+const normalizeUrl = (u: string) =>
+  (u || '').trim().toLowerCase().replace(/\.git$/, '').replace(/\/+$/, '')
 
 const riskConfig = {
   critical: { color: 'bg-red-500', textColor: 'text-red-400', icon: ShieldAlert, label: 'Critical' },
@@ -49,6 +54,10 @@ const statusConfig: Record<string, { color: string; label: string; icon: React.E
 }
 
 export default function SecretsPage() {
+  const searchParams = useSearchParams()
+  const router = useRouter()
+  const repoParam = searchParams.get('repo') || ''
+  const [repoFilter, setRepoFilter] = useState<string>(repoParam)
   const [secrets, setSecrets] = useState<SecretWithRepo[]>([])
   const [loading, setLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
@@ -129,10 +138,75 @@ export default function SecretsPage() {
     const matchesRisk = riskFilter === 'all' || secret.risk_level === riskFilter
     const matchesStatus = statusFilter === 'all' || secret.status === statusFilter
     const matchesType = typeFilter === 'all' || secret.type === typeFilter
-    return matchesSearch && matchesRisk && matchesStatus && matchesType
+    const filterIsUrl = /^https?:\/\//i.test(repoFilter) || repoFilter.startsWith('git@')
+    const matchesRepo =
+      !repoFilter ||
+      (filterIsUrl
+        ? normalizeUrl(secret.repository_url || '') === normalizeUrl(repoFilter)
+        : repoName.toLowerCase() === repoFilter.toLowerCase())
+    return matchesSearch && matchesRisk && matchesStatus && matchesType && matchesRepo
   })
 
+  const groupedSecrets = useMemo(() => {
+    const groups = new Map<string, { name: string; url: string; items: SecretWithRepo[] }>()
+    for (const s of filteredSecrets) {
+      const name = s.repository_name || 'Unknown repository'
+      const url = s.repository_url || ''
+      const key = (url ? normalizeUrl(url) : name.toLowerCase()) || 'unknown'
+      const bucket = groups.get(key) ?? { name, url, items: [] }
+      bucket.items.push(s)
+      groups.set(key, bucket)
+    }
+    return Array.from(groups.values()).sort((a, b) => {
+      const sevWeight = (g: { items: SecretWithRepo[] }) =>
+        g.items.reduce(
+          (acc, x) =>
+            acc +
+            (x.risk_level === 'critical'
+              ? 10
+              : x.risk_level === 'high'
+              ? 6
+              : x.risk_level === 'medium'
+              ? 3
+              : 1),
+          0,
+        )
+      return sevWeight(b) - sevWeight(a) || b.items.length - a.items.length || a.name.localeCompare(b.name)
+    })
+  }, [filteredSecrets])
+
   const secretTypes = Array.from(new Set(secrets.map((s) => s.type)))
+  const repoOptions = useMemo(() => {
+    // Build (value=url, label=name) pairs from all known secret repos.
+    const seen = new Map<string, { value: string; label: string }>()
+    for (const s of secrets) {
+      const url = s.repository_url || ''
+      const name = s.repository_name || (url ? url.split('/').pop() || url : 'Unknown')
+      const key = url ? normalizeUrl(url) : name.toLowerCase()
+      if (!seen.has(key)) seen.set(key, { value: url || name, label: name })
+    }
+    if (repoFilter) {
+      const key = /^https?:\/\//i.test(repoFilter) ? normalizeUrl(repoFilter) : repoFilter.toLowerCase()
+      if (!seen.has(key)) seen.set(key, { value: repoFilter, label: repoFilter })
+    }
+    return [{ value: '', label: 'All Repositories' }, ...Array.from(seen.values())]
+  }, [secrets, repoFilter])
+
+  const updateRepoFilter = (value: string) => {
+    setRepoFilter(value)
+    const params = new URLSearchParams(Array.from(searchParams.entries()))
+    if (value) params.set('repo', value)
+    else params.delete('repo')
+    const qs = params.toString()
+    router.replace(qs ? `/secrets?${qs}` : '/secrets')
+  }
+
+  const generatePdfReport = () => {
+    const url = repoFilter
+      ? `/reports/pdf?repo=${encodeURIComponent(repoFilter)}`
+      : '/reports/pdf'
+    window.open(url, '_blank', 'noopener,noreferrer')
+  }
 
   const handleResolveSecret = () => {
     if (selectedSecret) {
@@ -241,9 +315,9 @@ export default function SecretsPage() {
             {/* Page Header */}
             <div className="flex items-center justify-between">
               <div>
-                <h1 className="text-2xl font-bold text-[var(--text-primary)]">Secrets</h1>
+                <h1 className="text-2xl font-bold text-[var(--text-primary)]">Findings</h1>
                 <p className="text-[var(--text-muted)] mt-1">
-                  View and manage detected secrets across all repositories
+                  All detected secrets across your repositories — triage, resolve, or mark as false positive.
                 </p>
               </div>
               <div className="flex gap-3">
@@ -258,9 +332,9 @@ export default function SecretsPage() {
                     <button onClick={exportJSON} className="w-full px-4 py-2 text-left text-sm text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] rounded-b-lg">Export JSON</button>
                   </div>
                 </div>
-                <Button>
+                <Button onClick={generatePdfReport}>
                   <FileText className="w-4 h-4 mr-2" />
-                  Generate Report
+                  {repoFilter ? `Report · ${repoFilter}` : 'Generate Report'}
                 </Button>
               </div>
             </div>
@@ -349,14 +423,20 @@ export default function SecretsPage() {
                   { value: 'false_positive', label: 'False Positive' },
                 ]}
               />
-              <Select 
-                value={typeFilter} 
-                onChange={(value) => setTypeFilter(value)} 
+              <Select
+                value={typeFilter}
+                onChange={(value) => setTypeFilter(value)}
                 className="w-full lg:w-48"
                 options={[
                   { value: 'all', label: 'All Types' },
                   ...secretTypes.map((type) => ({ value: type, label: type })),
                 ]}
+              />
+              <Select
+                value={repoFilter}
+                onChange={(value) => updateRepoFilter(value)}
+                className="w-full lg:w-56"
+                options={repoOptions}
               />
               <Button variant="secondary" onClick={() => setLoading(true)}>
                 <RefreshCw className="w-4 h-4 mr-2" />
@@ -407,51 +487,82 @@ export default function SecretsPage() {
               </Card>
             )}
 
-            {/* Secrets Table */}
-            <Card className="overflow-hidden">
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead className="bg-[var(--bg-secondary)] border-b border-[var(--border-color)]">
-                    <tr>
-                      <th className="w-12 px-4 py-4">
-                        <button
-                          onClick={toggleSelectAll}
-                          className="p-1 rounded hover:bg-[var(--bg-tertiary)] transition-colors"
-                        >
-                          {selectedIds.size === filteredSecrets.length && filteredSecrets.length > 0 ? (
-                            <CheckSquare className="w-5 h-5 text-blue-400" />
-                          ) : (
-                            <Square className="w-5 h-5 text-[var(--text-muted)]" />
+            {/* Secrets Table — grouped by repository */}
+            {loading ? (
+              <Card className="overflow-hidden">
+                <div className="p-6 space-y-3">
+                  {Array.from({ length: 5 }).map((_, i) => (
+                    <Skeleton key={i} className="h-8 w-full" />
+                  ))}
+                </div>
+              </Card>
+            ) : filteredSecrets.length === 0 ? (
+              <Card className="text-center py-12 text-[var(--text-muted)]">No secrets found</Card>
+            ) : (
+              groupedSecrets.map((group) => {
+                const sevTotals = { critical: 0, high: 0, medium: 0, low: 0 } as Record<string, number>
+                for (const item of group.items) {
+                  const lvl = (item.risk_level || 'low') as keyof typeof sevTotals
+                  if (lvl in sevTotals) sevTotals[lvl]++
+                }
+                return (
+                  <Card key={group.url || group.name} className="overflow-hidden" noPadding>
+                    <div className="px-6 py-4 border-b border-[var(--border-color)] bg-[var(--bg-secondary)] flex items-center justify-between gap-4 flex-wrap">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="p-2 bg-[var(--bg-tertiary)] rounded-lg shrink-0">
+                          <FolderGit2 className="w-5 h-5 text-[var(--accent)]" />
+                        </div>
+                        <div className="min-w-0">
+                          <h3 className="text-base font-semibold text-[var(--text-primary)] truncate">
+                            {group.name}
+                          </h3>
+                          {group.url && (
+                            <p className="text-xs text-[var(--text-muted)] font-mono truncate">{group.url}</p>
                           )}
-                        </button>
-                      </th>
-                      <th className="text-left px-6 py-4 text-sm font-medium text-[var(--text-muted)]">Type</th>
-                      <th className="text-left px-6 py-4 text-sm font-medium text-[var(--text-muted)]">Risk</th>
-                      <th className="text-left px-6 py-4 text-sm font-medium text-[var(--text-muted)]">Location</th>
-                      <th className="text-left px-6 py-4 text-sm font-medium text-[var(--text-muted)]">Value</th>
-                      <th className="text-left px-6 py-4 text-sm font-medium text-[var(--text-muted)]">Repository</th>
-                      <th className="text-left px-6 py-4 text-sm font-medium text-[var(--text-muted)]">Status</th>
-                      <th className="text-left px-6 py-4 text-sm font-medium text-[var(--text-muted)]">Detected</th>
-                      <th className="text-left px-6 py-4 text-sm font-medium text-[var(--text-muted)]">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-[var(--border-color)]">
-                    {loading ? (
-                      Array.from({ length: 5 }).map((_, i) => (
-                        <tr key={i}>
-                          <td colSpan={9} className="px-6 py-4">
-                            <Skeleton className="h-8 w-full" />
-                          </td>
-                        </tr>
-                      ))
-                    ) : filteredSecrets.length === 0 ? (
-                      <tr>
-                        <td colSpan={9} className="text-center py-12 text-[var(--text-muted)]">
-                          No secrets found
-                        </td>
-                      </tr>
-                    ) : (
-                      filteredSecrets.map((secret) => {
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 text-xs flex-wrap">
+                        <span className="px-2 py-1 rounded bg-[var(--bg-tertiary)] text-[var(--text-secondary)] font-medium">
+                          {group.items.length} finding{group.items.length === 1 ? '' : 's'}
+                        </span>
+                        {sevTotals.critical > 0 && (
+                          <span className="px-2 py-1 rounded bg-red-500/10 text-red-400 font-medium">
+                            {sevTotals.critical} critical
+                          </span>
+                        )}
+                        {sevTotals.high > 0 && (
+                          <span className="px-2 py-1 rounded bg-orange-500/10 text-orange-400 font-medium">
+                            {sevTotals.high} high
+                          </span>
+                        )}
+                        {sevTotals.medium > 0 && (
+                          <span className="px-2 py-1 rounded bg-yellow-500/10 text-yellow-400 font-medium">
+                            {sevTotals.medium} medium
+                          </span>
+                        )}
+                        {sevTotals.low > 0 && (
+                          <span className="px-2 py-1 rounded bg-green-500/10 text-green-400 font-medium">
+                            {sevTotals.low} low
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full">
+                        <thead className="bg-[var(--bg-secondary)]/60 border-b border-[var(--border-color)]">
+                          <tr>
+                            <th className="w-12 px-4 py-3"></th>
+                            <th className="text-left px-6 py-3 text-xs font-medium text-[var(--text-muted)] uppercase tracking-wide">Type</th>
+                            <th className="text-left px-6 py-3 text-xs font-medium text-[var(--text-muted)] uppercase tracking-wide">Risk</th>
+                            <th className="text-left px-6 py-3 text-xs font-medium text-[var(--text-muted)] uppercase tracking-wide">Location</th>
+                            <th className="text-left px-6 py-3 text-xs font-medium text-[var(--text-muted)] uppercase tracking-wide">Value</th>
+                            <th className="text-left px-6 py-3 text-xs font-medium text-[var(--text-muted)] uppercase tracking-wide">Status</th>
+                            <th className="text-left px-6 py-3 text-xs font-medium text-[var(--text-muted)] uppercase tracking-wide">Detected</th>
+                            <th className="text-left px-6 py-3 text-xs font-medium text-[var(--text-muted)] uppercase tracking-wide">Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-[var(--border-color)]">
+                          {group.items.map((secret) => {
                         const risk = riskConfig[secret.risk_level as keyof typeof riskConfig] || riskConfig.medium
                         const status = statusConfig[secret.status] || statusConfig.active
                         const RiskIcon = risk.icon
@@ -509,9 +620,6 @@ export default function SecretsPage() {
                               </code>
                             </td>
                             <td className="px-6 py-4">
-                              <span className="text-[var(--text-secondary)]">{secret.repository_name}</span>
-                            </td>
-                            <td className="px-6 py-4">
                               <Badge variant={status.color as any}>
                                 <StatusIcon className="w-3 h-3 mr-1" />
                                 {status.label}
@@ -548,12 +656,14 @@ export default function SecretsPage() {
                             </td>
                           </tr>
                         )
-                      })
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </Card>
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </Card>
+                )
+              })
+            )}
           </div>
         </main>
 

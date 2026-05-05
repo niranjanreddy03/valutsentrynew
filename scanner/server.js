@@ -85,6 +85,37 @@ function getUserId(req) {
   return req.headers['x-user-id'] || 'local-user';
 }
 
+function normalizeRepoUrl(url) {
+  return String(url || '').trim().replace(/\/+$/, '').replace(/\.git$/i, '');
+}
+
+function cloneUrl(url) {
+  const normalized = normalizeRepoUrl(url);
+  return /\.git$/i.test(String(url || '').trim()) ? String(url || '').trim().replace(/\/+$/, '') : `${normalized}.git`;
+}
+
+function inferProvider(url) {
+  const normalized = normalizeRepoUrl(url).toLowerCase();
+  if (normalized.includes('gitlab.com')) return 'gitlab';
+  if (normalized.includes('bitbucket.org')) return 'bitbucket';
+  if (normalized.includes('dev.azure.com') || normalized.includes('visualstudio.com')) return 'azure';
+  return 'github';
+}
+
+function repoNameFromUrl(url) {
+  const normalized = normalizeRepoUrl(url);
+  try {
+    const parsed = new URL(normalized);
+    return parsed.pathname.replace(/^\/+/, '').replace(/\/_git\//, '/').split('/').pop() || 'unknown';
+  } catch {
+    return normalized.split(/[/:]/).filter(Boolean).pop() || 'unknown';
+  }
+}
+
+function sameRepoUrl(a, b) {
+  return normalizeRepoUrl(a).toLowerCase() === normalizeRepoUrl(b).toLowerCase();
+}
+
 // ─── Health Check ───────────────────────────────────────────────────────────
 app.get('/health', (req, res) => {
   res.json({
@@ -148,16 +179,24 @@ app.get('/api/v1/repositories', (req, res) => {
 
 app.post('/api/v1/repositories', (req, res) => {
   const { name, url, provider = 'github', branch = 'main' } = req.body;
-  if (!name || !url) {
+  const userId = getUserId(req);
+  const normalizedUrl = normalizeRepoUrl(url);
+  if (!name || !normalizedUrl) {
     return res.status(400).json({ error: 'name and url are required' });
   }
+
+  const existing = store.repositories.find(r => r.user_id === userId && sameRepoUrl(r.url, normalizedUrl));
+  if (existing) {
+    return res.status(409).json({ error: 'Repository already exists', repository: existing });
+  }
+
   const repo = {
     id: store._nextRepoId++,
-    user_id: getUserId(req),
-    name,
-    url,
-    provider,
-    branch,
+    user_id: userId,
+    name: String(name).trim(),
+    url: normalizedUrl,
+    provider: provider || inferProvider(normalizedUrl),
+    branch: String(branch || 'main').trim() || 'main',
     status: 'active',
     last_scan_at: null,
     secrets_count: 0,
@@ -172,10 +211,14 @@ app.post('/api/v1/repositories', (req, res) => {
 });
 
 app.delete('/api/v1/repositories/:id', (req, res) => {
+  const userId = getUserId(req);
   const id = parseInt(req.params.id);
-  store.repositories = store.repositories.filter(r => r.id !== id);
-  store.scans = store.scans.filter(s => s.repository_id !== id);
-  store.secrets = store.secrets.filter(s => s.repository_id !== id);
+  const repo = store.repositories.find(r => r.id === id && r.user_id === userId);
+  if (!repo) return res.status(404).json({ error: 'Repository not found' });
+
+  store.repositories = store.repositories.filter(r => !(r.id === id && r.user_id === userId));
+  store.scans = store.scans.filter(s => !(s.repository_id === id && s.user_id === userId));
+  store.secrets = store.secrets.filter(s => !(s.repository_id === id && s.user_id === userId));
   saveStore();
   res.json({ success: true });
 });
@@ -200,8 +243,9 @@ app.get('/api/v1/scans', (req, res) => {
 });
 
 app.get('/api/v1/scans/:id', (req, res) => {
+  const userId = getUserId(req);
   const id = parseInt(req.params.id);
-  const scan = store.scans.find(s => s.id === id);
+  const scan = store.scans.find(s => s.id === id && s.user_id === userId);
   if (!scan) return res.status(404).json({ error: 'Scan not found' });
   
   const secrets = store.secrets.filter(s => s.scan_id === id);
@@ -221,6 +265,7 @@ app.get('/api/v1/secrets', (req, res) => {
     return {
       ...secret,
       repository_name: repo?.name || 'Unknown',
+      repository_url: repo?.url || '',
     };
   });
   res.json(secrets);
@@ -280,22 +325,24 @@ app.get('/api/v1/stats', (req, res) => {
 
 app.post('/api/v1/scans/trigger', async (req, res) => {
   const { scan_id, repository_id, repository_url, branch = 'main' } = req.body;
+  const userId = getUserId(req);
+  const normalizedUrl = normalizeRepoUrl(repository_url);
 
-  if (!repository_url) {
+  if (!normalizedUrl) {
     return res.status(400).json({ error: 'Missing repository_url' });
   }
 
   // Find or create repo in store
-  let repo = store.repositories.find(r => r.url === repository_url);
+  let repo = store.repositories.find(r => r.user_id === userId && sameRepoUrl(r.url, normalizedUrl));
   if (!repo) {
-    const repoName = repository_url.split('/').pop() || 'unknown';
+    const repoName = repoNameFromUrl(normalizedUrl);
     repo = {
       id: store._nextRepoId++,
-      user_id: getUserId(req),
+      user_id: userId,
       name: repoName,
-      url: repository_url,
-      provider: 'github',
-      branch: branch,
+      url: normalizedUrl,
+      provider: inferProvider(normalizedUrl),
+      branch: String(branch || 'main').trim() || 'main',
       status: 'active',
       last_scan_at: null,
       secrets_count: 0,
@@ -310,7 +357,7 @@ app.post('/api/v1/scans/trigger', async (req, res) => {
   const scanRecord = {
     id: store._nextScanId++,
     repository_id: repo.id,
-    user_id: getUserId(req),
+    user_id: userId,
     status: 'queued',
     trigger_type: 'manual',
     branch: branch,
@@ -326,7 +373,7 @@ app.post('/api/v1/scans/trigger', async (req, res) => {
   store.scans.push(scanRecord);
   saveStore();
 
-  logger.info(`[TRIGGER] Scan #${scanRecord.id} queued for ${repository_url}`);
+  logger.info(`[TRIGGER] Scan #${scanRecord.id} queued for ${normalizedUrl}`);
 
   // Respond immediately
   res.status(202).json({ status: 'queued', scan_id: scanRecord.id });
@@ -344,7 +391,7 @@ async function runScanInBackground(scanRecord, repo, branch) {
 
     // Run the scanner
     const startTime = Date.now();
-    const result = await scanRepository(repo.url, {
+    const result = await scanRepository(cloneUrl(repo.url), {
       branch,
       maskValues: true,
       useGitignore: true,
@@ -388,7 +435,9 @@ async function runScanInBackground(scanRecord, repo, branch) {
 
     // Update repo stats
     repo.last_scan_at = new Date().toISOString();
-    repo.secrets_count = store.secrets.filter(s => s.repository_id === repo.id).length;
+    repo.secrets_count = newSecrets.length;
+    repo.status = 'active';
+    repo.updated_at = new Date().toISOString();
 
     saveStore();
     logger.info(`[SCAN #${scanRecord.id}] ✅ Complete: ${newSecrets.length} findings in ${result.filesScanned} files (${durationSeconds}s)`);
@@ -408,12 +457,13 @@ async function runScanInBackground(scanRecord, repo, branch) {
 
 app.post('/api/v1/scans/quick', async (req, res) => {
   const { repository_url, branch = 'main' } = req.body;
-  if (!repository_url) {
+  const normalizedUrl = normalizeRepoUrl(repository_url);
+  if (!normalizedUrl) {
     return res.status(400).json({ error: 'Missing repository_url' });
   }
   try {
-    logger.info(`[QUICK] Scanning ${repository_url}`);
-    const result = await scanRepository(repository_url, {
+    logger.info(`[QUICK] Scanning ${normalizedUrl}`);
+    const result = await scanRepository(cloneUrl(normalizedUrl), {
       branch,
       maskValues: true,
       useGitignore: true,
@@ -572,6 +622,7 @@ app.get('/api/v1/reports/full', (req, res) => {
       return {
         id: s.id,
         repository: repo?.name || 'Unknown',
+        repository_url: repo?.url || '',
         type: s.type,
         severity: s.risk_level,
         file: s.file_path,

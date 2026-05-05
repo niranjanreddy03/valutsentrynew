@@ -17,9 +17,9 @@ class Settings(BaseSettings):
     DEBUG: bool = False
     ENVIRONMENT: str = "development"
     
-    # Server
+    # Server (8001 — port 8000 is used by the Node.js scanner)
     HOST: str = "0.0.0.0"
-    PORT: int = 8000
+    PORT: int = 8001
     
     # Security
     SECRET_KEY: str = secrets.token_urlsafe(32)
@@ -36,6 +36,10 @@ class Settings(BaseSettings):
     SUPABASE_URL: Optional[str] = None
     SUPABASE_KEY: Optional[str] = None  # anon key for frontend, service role for backend
     SUPABASE_SERVICE_KEY: Optional[str] = None  # service role key for bypassing RLS
+    # JWT signing secret used by Supabase Auth (HS256). Required to verify
+    # access tokens server-side instead of trusting unsigned claims.
+    SUPABASE_JWT_SECRET: Optional[str] = None
+    SUPABASE_JWT_AUDIENCE: str = "authenticated"
     
     # Redis
     REDIS_URL: str = "redis://localhost:6379/0"
@@ -78,6 +82,9 @@ class Settings(BaseSettings):
     AWS_ACCESS_KEY_ID: Optional[str] = None
     AWS_SECRET_ACCESS_KEY: Optional[str] = None
     AWS_REGION: str = "us-east-1"
+    # KMS key ID (or alias) for envelope encryption of stored tokens.
+    # When set, all new encryptions use KMS; old v1/v2 blobs still decrypt via local key.
+    KMS_KEY_ID: Optional[str] = None
     
     # Email (for alerts)
     SMTP_HOST: Optional[str] = None
@@ -85,6 +92,10 @@ class Settings(BaseSettings):
     SMTP_USER: Optional[str] = None
     SMTP_PASSWORD: Optional[str] = None
     EMAIL_FROM: str = "alerts@VaultSentry.io"
+
+    # Resend (transactional email for MFA OTP codes)
+    RESEND_API_KEY: Optional[str] = None
+    SUPPORT_FROM_ADDRESS: str = "VaultSentry <support@thevaultsentry.com>"
     
     # Slack Integration
     SLACK_WEBHOOK_URL: Optional[str] = None
@@ -97,6 +108,7 @@ class Settings(BaseSettings):
         env_file = ".env"
         env_file_encoding = "utf-8"
         case_sensitive = True
+        extra = "ignore"
 
 
 settings = Settings()

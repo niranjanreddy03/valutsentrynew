@@ -227,7 +227,7 @@ export const repositoryService = {
           .from('users')
           .select('id')
           .eq('id', user.id)
-          .single()
+          .maybeSingle()
         
         if (userCheckError && userCheckError.code !== 'PGRST116') {
           console.log('[REPO SERVICE] User check error (non-critical):', userCheckError.message)
@@ -237,6 +237,7 @@ export const repositoryService = {
           console.log('[REPO SERVICE] User profile not found, creating...')
           const { error: createUserError } = await supabase
             .from('users')
+            // @ts-expect-error - Supabase type inference issue with @supabase/ssr
             .insert({
               id: user.id,
               email: user.email || '',
@@ -261,6 +262,9 @@ export const repositoryService = {
     // Prepare repository data with all required fields
     const repoData: InsertRepository = {
       ...repo,
+      name: repo.name.trim(),
+      url: repo.url.trim().replace(/\/+$/, ''),
+      branch: repo.branch?.trim() || 'main',
       user_id: user.id,
       status: repo.status || 'active',
       secrets_count: 0,
@@ -297,9 +301,9 @@ export const repositoryService = {
       if (error.code === '23505') {
         throw new Error('A repository with this URL already exists')
       } else if (error.code === '23503') {
-        throw new Error('Invalid user reference. Please log in again.')
-      } else if (error.code === '42501') {
-        throw new Error('Permission denied. Check your subscription.')
+        throw new Error('Your user profile is missing. Run supabase/migrations/fix_user_profile_insert.sql, then try again.')
+      } else if (error.code === '42501' || /row-level security/i.test(error.message || '')) {
+        throw new Error('Permission denied by Supabase RLS. Make sure the users and repositories insert policies are applied.')
       }
       
       throw new Error(`Failed to save repository: ${error.message}`)

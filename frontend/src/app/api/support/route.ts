@@ -97,7 +97,7 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // 2) Email the on-call team via Resend.
+  // 2) Email the on-call team via Resend (optional — quiet when not configured).
   const resendKey = process.env.RESEND_API_KEY
   if (resendKey) {
     try {
@@ -127,9 +127,9 @@ export async function POST(request: NextRequest) {
     } catch (e: any) {
       outcome.errors.push(`email: ${e?.message || 'Resend request failed'}`)
     }
-  } else {
-    outcome.errors.push('email: RESEND_API_KEY not configured')
   }
+  // RESEND_API_KEY not being set isn't an error — persistence + Slack are
+  // valid stand-alone delivery channels. Silently skip.
 
   // 3) Priority-tier: also notify Slack if a webhook is set.
   const slackWebhook = process.env.SUPPORT_SLACK_WEBHOOK_URL

@@ -40,7 +40,7 @@ function loadGitignore(rootDir) {
 
   const ig = ignore();
   // Always ignore these even without a .gitignore file
-  ig.add(['node_modules', '.git', '.env', '*.lock']);
+  ig.add(['node_modules', '.git', '*.lock']);
 
   const gitignorePath = path.join(rootDir, '.gitignore');
   try {
@@ -52,6 +52,22 @@ function loadGitignore(rootDir) {
   }
 
   return ig;
+}
+
+function isSensitiveConfigPath(relativePath) {
+  const normalized = relativePath.replace(/\\/g, '/').toLowerCase();
+  const base = path.basename(normalized);
+  return (
+    base === '.env' ||
+    base.startsWith('.env.') ||
+    base === 'application.properties' ||
+    base === 'application.yml' ||
+    base === 'application.yaml' ||
+    base === 'bootstrap.properties' ||
+    base === 'bootstrap.yml' ||
+    base === 'bootstrap.yaml' ||
+    normalized.includes('/src/main/resources/')
+  );
 }
 
 // ─── Concurrency limiter ──────────────────────────────────────────────────────
@@ -113,7 +129,7 @@ async function collectFiles(rootDir, ig) {
       // ── Gitignore check ──
       if (ig) {
         const relative = path.relative(rootDir, fullPath).replace(/\\/g, '/');
-        if (ig.ignores(relative)) {
+        if (ig.ignores(relative) && !isSensitiveConfigPath(relative)) {
           logger.debug(`Gitignore: skipping ${relative}`);
           continue;
         }

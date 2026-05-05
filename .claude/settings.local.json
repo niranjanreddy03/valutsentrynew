@@ -16,7 +16,31 @@
       "mcp__83757396-f04b-4071-a921-f5411ce9c745__execute_sql",
       "Bash(npm audit *)",
       "Bash(npm install *)",
-      "Bash(xargs grep *)"
+      "Bash(xargs grep *)",
+      "Bash(python -c \"from app.main import app\")",
+      "Read(//c/Users/niran/Downloads/secret-sentry-master/**)",
+      "Bash(node server.js)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" https://github.com/niranjanreddy03/faketesting)",
+      "Bash(curl -s https://api.github.com/repos/niranjanreddy03/faketesting)",
+      "Bash(curl -s http://localhost:8000/api/v1/scans/66)",
+      "Bash(git config *)",
+      "Bash(curl -s -X POST http://localhost:8000/api/v1/scans/trigger -H \"Content-Type: application/json\" -d '{\"repository_url\":\"https://github.com/niranjanreddy03/faketesting.git\",\"branch\":\"main\"}')",
+      "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(json.dumps\\(d[0] if isinstance\\(d,list\\) else d, indent=2\\)[:600]\\)\")",
+      "Bash(curl -s \"http://localhost:8000/api/v1/reports/full\" -H \"x-user-id: local-user\")",
+      "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('repos:', [r.get\\('name'\\) for r in d.get\\('repositories',[]\\)][:5]\\); print\\('first finding:', json.dumps\\(d.get\\('findings',[{}]\\)[0], indent=2\\)[:500] if d.get\\('findings'\\) else 'none'\\)\")",
+      "Bash(npx tsc *)",
+      "Bash(taskkill /F /PID 11572)",
+      "Bash(curl -s http://localhost:8000/api/v1/secrets -H \"x-user-id: 1df5f5f1-b295-4dcb-96a6-371488627f59\")",
+      "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(list\\(d[0].keys\\(\\)\\) if d else 'empty'\\)\")",
+      "Bash(netstat -ano)",
+      "PowerShell(Stop-Process -Id 11572 -Force -ErrorAction SilentlyContinue)",
+      "PowerShell(Get-Process -Name node -ErrorAction SilentlyContinue)",
+      "Bash(curl -s http://localhost:8000/api/v1/scans -H \"x-user-id: 1df5f5f1-b295-4dcb-96a6-371488627f59\")",
+      "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('count:', len\\(d\\) if isinstance\\(d,list\\) else 'n/a'\\); print\\(json.dumps\\(d[0] if d else {}, indent=2\\)[:500]\\)\")",
+      "Bash(grep -iE '\\\\.env$|\\\\.env\\\\.|secrets\\\\.json|credentials')",
+      "Bash(grep -iE 'scan_report\\\\.html|scan_results\\\\.json|^report\\\\.html$|fake_secrets\\\\.js|demoData\\\\.ts')",
+      "Bash(./.smoke/Scripts/python.exe -c ' *)",
+      "PowerShell(python -m pip install certifi 2>&1)"
     ]
   }
 }

@@ -68,8 +68,15 @@ export default function RepositoriesPage() {
   })
 
   // URL validation patterns
+  const normalizeRepositoryUrl = (url: string): string => {
+    const trimmed = url.trim()
+    if (!trimmed) return ''
+    return trimmed.replace(/\/+$/, '')
+  }
+
   const validateRepositoryUrl = (url: string, provider: string): string | null => {
-    if (!url) return 'Repository URL is required'
+    const normalizedUrl = normalizeRepositoryUrl(url)
+    if (!normalizedUrl) return 'Repository URL is required'
     
     const patterns: Record<string, RegExp[]> = {
       github: [
@@ -90,7 +97,7 @@ export default function RepositoriesPage() {
     }
     
     const providerPatterns = patterns[provider] || []
-    const isValid = providerPatterns.some(pattern => pattern.test(url.trim()))
+    const isValid = providerPatterns.some(pattern => pattern.test(normalizedUrl))
     
     if (!isValid) {
       const examples: Record<string, string> = {
@@ -107,8 +114,12 @@ export default function RepositoriesPage() {
 
   // Extract repo name from URL
   const extractRepoName = (url: string): string => {
-    const match = url.match(/\/([^\/]+?)(?:\.git)?$/)
-    return match ? match[1] : ''
+    const normalizedUrl = normalizeRepositoryUrl(url).replace(/\.git$/i, '')
+    const sshMatch = normalizedUrl.match(/:([^/:]+)$/)
+    if (sshMatch) return sshMatch[1]
+
+    const pathMatch = normalizedUrl.match(/\/([^/]+)$/)
+    return pathMatch ? pathMatch[1] : ''
   }
 
   // Handle URL change with validation
@@ -213,14 +224,18 @@ export default function RepositoriesPage() {
   }, [fetchRepositories])
 
   const handleAddRepository = async () => {
+    const repositoryUrl = normalizeRepositoryUrl(newRepo.url)
+    const repositoryName = newRepo.name.trim() || extractRepoName(repositoryUrl)
+    const repositoryBranch = newRepo.branch.trim() || 'main'
+
     // Validate required fields
-    if (!newRepo.name || !newRepo.url) {
+    if (!repositoryName || !repositoryUrl) {
       toast.error('Missing fields', 'Please fill in all required fields')
       return
     }
 
     // Validate URL format
-    const urlValidationError = validateRepositoryUrl(newRepo.url, newRepo.provider)
+    const urlValidationError = validateRepositoryUrl(repositoryUrl, newRepo.provider)
     if (urlValidationError) {
       setUrlError(urlValidationError)
       toast.error('Invalid URL', urlValidationError)
@@ -230,12 +245,19 @@ export default function RepositoriesPage() {
     setIsAddingRepo(true)
     setUrlError(null)
 
+    const repoToCreate = {
+      name: repositoryName,
+      url: repositoryUrl,
+      provider: newRepo.provider,
+      branch: repositoryBranch,
+    }
+
     try {
       // Persist to Supabase — source of truth, scoped to user via RLS.
-      console.log('[REPO ADD] Persisting to Supabase:', newRepo)
+      console.log('[REPO ADD] Persisting to Supabase:', repoToCreate)
       let savedRepo: Repository
       try {
-        savedRepo = await repositoryService.create(newRepo)
+        savedRepo = await repositoryService.create(repoToCreate)
         console.log('[REPO ADD] Saved to Supabase, id:', savedRepo.id)
       } catch (supabaseErr: any) {
         console.error('[REPO ADD] Supabase insert failed:', supabaseErr)
@@ -576,7 +598,7 @@ export default function RepositoriesPage() {
                               {repo.secrets_count} secret{repo.secrets_count === 1 ? '' : 's'} found
                             </p>
                             <button
-                              onClick={() => router.push(`/secrets?repo=${repo.id}`)}
+                              onClick={() => router.push(`/secrets?repo=${encodeURIComponent(repo.url || repo.name)}`)}
                               className="ml-auto text-xs text-amber-200 hover:text-amber-100 underline underline-offset-2"
                             >
                               View findings →
@@ -634,7 +656,7 @@ export default function RepositoriesPage() {
                             return
                           }
                           window.open(
-                            `/reports/pdf?repo=${encodeURIComponent(repo.name)}`,
+                            `/reports/pdf?repo=${encodeURIComponent(repo.url || repo.name)}`,
                             '_blank',
                             'noopener,noreferrer',
                           )

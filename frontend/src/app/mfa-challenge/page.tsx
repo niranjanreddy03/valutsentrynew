@@ -5,6 +5,8 @@ import { useRouter } from 'next/navigation'
 import { ShieldCheck, ArrowLeft } from 'lucide-react'
 import { supabase } from '@/services/supabase'
 import { useToast } from '@/contexts/ToastContext'
+import { useAuth } from '@/contexts/AuthContext'
+import { getLocalMfaFactor, verifyTotpCode } from '@/lib/localMfa'
 import { AuthLayout, AuthCard, AuthButton, OtpInput } from '@/components/auth'
 
 /**
@@ -15,8 +17,10 @@ import { AuthLayout, AuthCard, AuthButton, OtpInput } from '@/components/auth'
 export default function MfaChallengePage() {
   const router = useRouter()
   const { showToast } = useToast()
+  const { user, supabaseUser, logout, isLoading: authLoading } = useAuth()
 
   const [factorId, setFactorId] = useState<string | null>(null)
+  const [localSecret, setLocalSecret] = useState<string | null>(null)
   const [code, setCode] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
@@ -25,7 +29,15 @@ export default function MfaChallengePage() {
   useEffect(() => {
     let cancelled = false
     ;(async () => {
+      if (authLoading) return
       try {
+        const localFactor = getLocalMfaFactor(user?.id || supabaseUser?.id)
+        if (localFactor) {
+          setFactorId(`local:${user?.id || supabaseUser?.id}`)
+          setLocalSecret(localFactor.secret)
+          return
+        }
+
         // Must be signed in (AAL1) to reach this screen.
         const { data: sessionData } = await supabase.auth.getSession()
         if (!sessionData.session) {
@@ -53,7 +65,7 @@ export default function MfaChallengePage() {
     return () => {
       cancelled = true
     }
-  }, [router])
+  }, [authLoading, router, supabaseUser, user])
 
   const handleVerify = async (value?: string) => {
     const v = value ?? code
@@ -61,6 +73,15 @@ export default function MfaChallengePage() {
     setError(null)
     setLoading(true)
     try {
+      if (localSecret) {
+        const valid = await verifyTotpCode(localSecret, v)
+        if (!valid) throw new Error('Invalid code. Please try again.')
+
+        showToast('Signed in', 'success')
+        router.replace('/')
+        return
+      }
+
       const { data: challenge, error: challengeErr } =
         await supabase.auth.mfa.challenge({ factorId })
       if (challengeErr) throw challengeErr
@@ -83,8 +104,7 @@ export default function MfaChallengePage() {
   }
 
   const cancel = async () => {
-    await supabase.auth.signOut()
-    router.replace('/login')
+    await logout()
   }
 
   return (

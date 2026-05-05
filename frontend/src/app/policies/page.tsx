@@ -182,7 +182,7 @@ export default function PoliciesPage() {
   useEffect(() => {
     loadPolicies()
     setExecutions(getExecutions())
-    setWebhooksState(getPolicyWebhooks())
+    getPolicyWebhooks().then(setWebhooksState).catch(() => setWebhooksState({}))
 
     // Keep the recent-triggers panel fresh when a scan fires policies.
     const refresh = () => setExecutions(getExecutions())
@@ -320,11 +320,15 @@ export default function PoliciesPage() {
     }
   }
 
-  const saveWebhooks = (cfg: PolicyWebhookConfig) => {
-    setPolicyWebhooks(cfg)
-    setWebhooksState(cfg)
-    setShowWebhookModal(false)
-    toast.success('Integrations saved')
+  const saveWebhooks = async (cfg: PolicyWebhookConfig) => {
+    try {
+      const saved = await setPolicyWebhooks(cfg)
+      setWebhooksState(saved)
+      setShowWebhookModal(false)
+      toast.success('Integrations saved')
+    } catch (err: any) {
+      toast.error('Save failed', err?.message || 'Could not save integrations')
+    }
   }
 
   const clearTriggerLog = () => {

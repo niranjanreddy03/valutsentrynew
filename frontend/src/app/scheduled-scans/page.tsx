@@ -3,8 +3,10 @@
 import FeatureGate from '@/components/FeatureGate'
 import Header from '@/components/layout/Header'
 import Sidebar from '@/components/layout/Sidebar'
+import { Button, Modal } from '@/components/ui'
 import { useToast } from '@/contexts/ToastContext'
 import { repositoryService } from '@/services/supabase'
+import type { InsertRepository } from '@/lib/supabase/types'
 import {
   deleteSchedule,
   getSchedules,
@@ -37,6 +39,9 @@ export default function ScheduledScansPage() {
   const [repoId, setRepoId] = useState<string>('')
   const [branch, setBranch] = useState('main')
   const [frequency, setFrequency] = useState<Freq>('daily')
+  const [newRepoUrl, setNewRepoUrl] = useState('')
+  const [creatingRepo, setCreatingRepo] = useState(false)
+  const [pendingDelete, setPendingDelete] = useState<ScheduledScan | null>(null)
 
   useEffect(() => {
     setSchedules(getSchedules())
@@ -53,16 +58,73 @@ export default function ScheduledScansPage() {
     return m
   }, [repos])
 
-  const addSchedule = () => {
-    if (!repoId) {
-      showToast('Pick a repository first', 'warning')
-      return
+  // Parse a GitHub/GitLab URL into { name, url, provider }. Returns null if
+  // we don't recognize the host so we don't insert garbage.
+  const parseRepoUrl = (raw: string) => {
+    const trimmed = raw.trim()
+    try {
+      const u = new URL(trimmed)
+      const parts = u.pathname.replace(/^\/+|\/+$/g, '').split('/').filter(Boolean)
+      if (parts.length < 2) return null
+      const owner = parts[0]
+      const name = parts[1].replace(/\.git$/, '')
+      const provider: InsertRepository['provider'] = u.hostname.includes('gitlab')
+        ? 'gitlab'
+        : u.hostname.includes('bitbucket')
+        ? 'bitbucket'
+        : u.hostname.includes('azure')
+        ? 'azure'
+        : 'github'
+      return {
+        name: `${owner}/${name}`,
+        url: `${u.origin}/${owner}/${name}`,
+        provider,
+      }
+    } catch {
+      return null
     }
-    const repo = repoMap.get(repoId) || repoMap.get(Number(repoId))
-    if (!repo) {
-      showToast('Repository not found', 'error')
-      return
+  }
+
+  const addSchedule = async () => {
+    let repo: any = null
+
+    const wantsNew = repoId === '__new__' || (repos.length === 0 && newRepoUrl.trim().length > 0)
+    if (wantsNew) {
+      const parsed = parseRepoUrl(newRepoUrl)
+      if (!parsed) {
+        showToast('Enter a valid repository URL', 'warning')
+        return
+      }
+      setCreatingRepo(true)
+      try {
+        repo = await repositoryService.create({
+          name: parsed.name,
+          url: parsed.url,
+          provider: parsed.provider,
+          branch: branch || 'main',
+        })
+        const next = await repositoryService.getAll().catch(() => repos)
+        setRepos(next)
+        showToast(`Added repository ${parsed.name}`, 'success')
+      } catch (e: any) {
+        showToast(e?.message || 'Failed to add repository', 'error')
+        setCreatingRepo(false)
+        return
+      } finally {
+        setCreatingRepo(false)
+      }
+    } else {
+      if (!repoId) {
+        showToast('Pick a repository first', 'warning')
+        return
+      }
+      repo = repoMap.get(repoId) || repoMap.get(Number(repoId))
+      if (!repo) {
+        showToast('Repository not found', 'error')
+        return
+      }
     }
+
     upsertSchedule({
       repositoryId: repo.id,
       repositoryName: repo.name || repo.full_name || String(repo.id),
@@ -77,6 +139,7 @@ export default function ScheduledScansPage() {
     setRepoId('')
     setBranch('main')
     setFrequency('daily')
+    setNewRepoUrl('')
   }
 
   const toggle = (s: ScheduledScan) => {
@@ -85,9 +148,15 @@ export default function ScheduledScansPage() {
   }
 
   const remove = (s: ScheduledScan) => {
-    if (!confirm(`Delete the ${s.frequency} schedule for ${s.repositoryName}?`)) return
-    deleteSchedule(s.id)
+    setPendingDelete(s)
+  }
+
+  const confirmDelete = () => {
+    if (!pendingDelete) return
+    deleteSchedule(pendingDelete.id)
     setSchedules(getSchedules())
+    showToast(`Schedule for ${pendingDelete.repositoryName} deleted`, 'success')
+    setPendingDelete(null)
   }
 
   const runNow = async (s: ScheduledScan) => {
@@ -154,12 +223,17 @@ export default function ScheduledScansPage() {
                     onChange={(e) => setRepoId(e.target.value)}
                     className="mt-1 w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 py-2 text-sm text-[var(--text-primary)]"
                   >
-                    <option value="">Select repository…</option>
+                    <option value="">
+                      {repos.length === 0
+                        ? 'No repositories yet — add one below'
+                        : 'Select repository…'}
+                    </option>
                     {repos.map((r) => (
                       <option key={r.id} value={r.id}>
                         {r.name || r.full_name || r.id}
                       </option>
                     ))}
+                    <option value="__new__">+ Add a new repository…</option>
                   </select>
                 </div>
                 <div>
@@ -188,9 +262,34 @@ export default function ScheduledScansPage() {
                   </select>
                 </div>
               </div>
+              {(repoId === '__new__' || repos.length === 0) && (
+                <div className="mt-4">
+                  <label className="block text-xs font-medium text-[var(--text-muted)]">
+                    Repository URL
+                  </label>
+                  <input
+                    value={newRepoUrl}
+                    onChange={(e) => setNewRepoUrl(e.target.value)}
+                    placeholder="https://github.com/owner/repo"
+                    className="mt-1 w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 py-2 text-sm text-[var(--text-primary)]"
+                  />
+                  <p className="mt-1 text-xs text-[var(--text-muted)]">
+                    GitHub, GitLab, Bitbucket, or Azure DevOps. For private
+                    repos, add a token in{' '}
+                    <Link href="/integrations" className="text-[var(--accent)] underline">
+                      Integrations
+                    </Link>{' '}
+                    first.
+                  </p>
+                </div>
+              )}
               <div className="mt-4 flex gap-2">
-                <button onClick={addSchedule} className="btn btn-primary">
-                  Create schedule
+                <button
+                  onClick={addSchedule}
+                  disabled={creatingRepo}
+                  className="btn btn-primary"
+                >
+                  {creatingRepo ? 'Adding repo…' : 'Create schedule'}
                 </button>
                 <button onClick={() => setShowNew(false)} className="btn btn-secondary">
                   Cancel
@@ -333,6 +432,31 @@ export default function ScheduledScansPage() {
           </FeatureGate>
         </main>
       </div>
+
+      <Modal
+        isOpen={!!pendingDelete}
+        onClose={() => setPendingDelete(null)}
+        title="Delete scheduled scan?"
+        description={
+          pendingDelete
+            ? `This will stop the ${pendingDelete.frequency} schedule for ${pendingDelete.repositoryName}. You can recreate it any time.`
+            : ''
+        }
+        size="sm"
+      >
+        <div className="flex justify-end gap-3 pt-2">
+          <Button variant="ghost" onClick={() => setPendingDelete(null)}>
+            Cancel
+          </Button>
+          <Button
+            variant="primary"
+            className="bg-red-600 hover:bg-red-500 border-red-600"
+            onClick={confirmDelete}
+          >
+            Delete schedule
+          </Button>
+        </div>
+      </Modal>
     </div>
   )
 }

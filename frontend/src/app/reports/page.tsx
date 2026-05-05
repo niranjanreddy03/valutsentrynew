@@ -89,6 +89,52 @@ export default function ReportsPage() {
     finally { setDownloading(null) }
   }
 
+  const handleDownloadRepoJSON = (repoName: string) => {
+    if (!report) return
+    setDownloading(`json-${repoName}`)
+    try {
+      const norm = (s: string) => (s || '').toLowerCase()
+      const target = norm(repoName)
+      const repos = report.repositories.filter((r) => norm(r.name) === target)
+      const scans = report.scans.filter((s) => norm(s.repository) === target)
+      const findings = report.findings.filter((f) => norm(f.repository) === target)
+      const by_severity = { critical: 0, high: 0, medium: 0, low: 0 } as Record<string, number>
+      for (const f of findings) {
+        const k = (f.severity || '').toLowerCase()
+        if (k in by_severity) by_severity[k]++
+      }
+      const filtered = {
+        report_type: 'repository',
+        generated_at: report.generated_at,
+        repository: repoName,
+        summary: {
+          total_repositories: repos.length,
+          total_scans: scans.length,
+          completed_scans: scans.filter((s) => s.status === 'completed').length,
+          total_secrets: findings.length,
+          active_secrets: findings.filter((f) => f.status === 'active').length,
+          by_severity,
+        },
+        repositories: repos,
+        scans,
+        findings,
+      }
+      const blob = new Blob([JSON.stringify(filtered, null, 2)], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      const safe = repoName.replace(/[^a-z0-9_-]+/gi, '_')
+      a.download = `vaultsentry-${safe}-${new Date().toISOString().split('T')[0]}.json`
+      a.click()
+      URL.revokeObjectURL(url)
+      toast.success('Report downloaded', `${repoName} JSON saved`)
+    } catch {
+      toast.error('Download failed')
+    } finally {
+      setDownloading(null)
+    }
+  }
+
   const handleDownloadCSV = async () => {
     setDownloading('csv')
     try {
@@ -119,7 +165,7 @@ export default function ReportsPage() {
             <div className="flex items-center justify-between">
               <div>
                 <h1 className="text-2xl font-bold text-[var(--text-primary)]">Security Reports</h1>
-                <p className="text-sm text-[var(--text-muted)] mt-1">View and download scan findings reports</p>
+                <p className="text-sm text-[var(--text-muted)] mt-1">Downloadable summaries (PDF, JSON, CSV) to share with stakeholders or auditors.</p>
               </div>
               <div className="flex items-center gap-3">
                 <Button variant="secondary" size="sm" leftIcon={<RefreshCw className="w-4 h-4" />} onClick={fetchReport} disabled={loading}>Refresh</Button>
@@ -159,6 +205,60 @@ export default function ReportsPage() {
                       const Icon = sevIcons[level]
                       return (<div key={level} className={`p-4 rounded-lg border ${sevColors[level]}`}><div className="flex items-center gap-2 mb-2"><Icon className="w-4 h-4" /><span className="text-sm font-medium capitalize">{level}</span></div><p className="text-2xl font-bold">{count}</p><p className="text-xs opacity-70">{pct}% of total</p></div>)
                     })}
+                  </div>
+                </Card>
+
+                {/* Per-Repository Reports */}
+                <Card className="overflow-hidden" noPadding>
+                  <div className="p-4 border-b border-[var(--border-color)]">
+                    <h2 className="text-lg font-semibold text-[var(--text-primary)] flex items-center gap-2">
+                      <FileText className="w-5 h-5" />Per-Repository Reports
+                    </h2>
+                    <p className="text-xs text-[var(--text-muted)] mt-1">Download a focused report for each scanned repository.</p>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full">
+                      <thead className="bg-[var(--bg-tertiary)]"><tr>
+                        <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text-muted)]">Repository</th>
+                        <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text-muted)]">Branch</th>
+                        <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text-muted)]">Findings</th>
+                        <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text-muted)]">Last Scan</th>
+                        <th className="text-right px-4 py-3 text-xs font-medium text-[var(--text-muted)]">Download</th>
+                      </tr></thead>
+                      <tbody className="divide-y divide-[var(--border-color)]">
+                        {report.repositories.length === 0 ? (
+                          <tr><td colSpan={5} className="px-4 py-6 text-center text-sm text-[var(--text-muted)]">No scanned repositories yet</td></tr>
+                        ) : report.repositories.map((r) => (
+                          <tr key={r.name} className="hover:bg-[var(--bg-tertiary)] transition-colors">
+                            <td className="px-4 py-3 text-sm text-[var(--text-primary)] font-medium">{r.name}</td>
+                            <td className="px-4 py-3 text-sm text-[var(--text-secondary)] font-mono">{r.branch || 'main'}</td>
+                            <td className="px-4 py-3 text-sm font-medium text-[var(--text-primary)]">{r.secrets_count}</td>
+                            <td className="px-4 py-3 text-sm text-[var(--text-muted)]">{fmtDate(r.last_scan_at)}</td>
+                            <td className="px-4 py-3">
+                              <div className="flex items-center justify-end gap-2">
+                                <Button
+                                  variant="primary"
+                                  size="sm"
+                                  leftIcon={<FileDown className="w-4 h-4" />}
+                                  onClick={() => window.open(`/reports/pdf?repo=${encodeURIComponent(r.name)}`, '_blank')}
+                                >
+                                  PDF
+                                </Button>
+                                <Button
+                                  variant="secondary"
+                                  size="sm"
+                                  leftIcon={downloading === `json-${r.name}` ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileJson className="w-4 h-4" />}
+                                  onClick={() => handleDownloadRepoJSON(r.name)}
+                                  disabled={downloading !== null}
+                                >
+                                  JSON
+                                </Button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
                 </Card>
 

@@ -2,12 +2,16 @@
 
 import { useState, useEffect, useMemo } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import Sidebar from '@/components/layout/Sidebar'
 import Header from '@/components/layout/Header'
 import { Button, Card, Input, Select, Badge } from '@/components/ui'
+import Modal from '@/components/ui/Modal'
 import { useToast } from '@/contexts/ToastContext'
 import { useAuth } from '@/contexts/AuthContext'
 import { supabase } from '@/services/supabase'
+import { getAuthHeaders } from '@/lib/authHeaders'
+import { deleteLocalMfaFactor, getLocalMfaFactor, verifyTotpCode } from '@/lib/localMfa'
 import {
   Settings,
   User,
@@ -64,6 +68,7 @@ export default function SettingsPage() {
   const [activeTab, setActiveTab] = useState<TabId>('profile')
   const [saving, setSaving] = useState(false)
   const toast = useToast()
+  const router = useRouter()
   const { user, supabaseUser, updateProfile, refreshSession } = useAuth()
 
   // Profile state
@@ -107,6 +112,16 @@ export default function SettingsPage() {
     ipWhitelist: '',
   })
   const [verifiedFactorId, setVerifiedFactorId] = useState<string | null>(null)
+  // MFA action modal
+  const [mfaAction, setMfaAction] = useState<null | 'disable' | 'regenerate'>(null)
+  const [mfaMethod, setMfaMethod] = useState<null | 'email' | 'totp'>(null)
+  const [mfaCode, setMfaCode] = useState('')
+  const [mfaError, setMfaError] = useState<string | null>(null)
+  const [mfaWorking, setMfaWorking] = useState(false)
+  const [otpSent, setOtpSent] = useState(false)
+  const [otpSending, setOtpSending] = useState(false)
+  const [otpMaskedEmail, setOtpMaskedEmail] = useState('')
+  const [devOtpCode, setDevOtpCode] = useState('')
 
   // Pull real MFA enrollment state from Supabase on mount so the "Enabled"
   // badge reflects reality instead of a hardcoded false.
@@ -114,6 +129,13 @@ export default function SettingsPage() {
     let cancelled = false
     const loadMfa = async () => {
       try {
+        const localFactor = getLocalMfaFactor(supabaseUser?.id)
+        if (localFactor) {
+          setSecurity((s) => ({ ...s, twoFactorEnabled: true }))
+          setVerifiedFactorId(`local:${supabaseUser?.id}`)
+          return
+        }
+
         const { data, error } = await supabase.auth.mfa.listFactors()
         if (error || cancelled) return
         const verified = data?.totp?.find((f: any) => f.status === 'verified')
@@ -129,19 +151,183 @@ export default function SettingsPage() {
     }
   }, [supabaseUser?.id])
 
-  const disableTwoFactor = async () => {
+  const openMfaPrompt = (action: 'disable' | 'regenerate') => {
     if (!verifiedFactorId) {
-      setSecurity({ ...security, twoFactorEnabled: false })
+      if (action === 'disable') setSecurity({ ...security, twoFactorEnabled: false })
+      else router.push('/mfa-setup')
       return
     }
+    setMfaCode('')
+    setMfaError(null)
+    setOtpSent(false)
+    setOtpMaskedEmail('')
+    setDevOtpCode('')
+    setMfaMethod(action === 'regenerate' || verifiedFactorId.startsWith('local:') ? 'totp' : null)
+    setMfaAction(action)
+  }
+
+  const closeMfaPrompt = () => {
+    setMfaAction(null)
+    setMfaMethod(null)
+    setMfaCode('')
+    setMfaError(null)
+    setOtpSent(false)
+    setOtpMaskedEmail('')
+    setDevOtpCode('')
+  }
+
+  const getAuthHeader = async () => {
+    const { data: { session } } = await supabase.auth.getSession()
+    return session?.access_token
+      ? { Authorization: `Bearer ${session.access_token}` }
+      : {}
+  }
+
+  const sendEmailOtp = async () => {
+    setOtpSending(true)
+    setMfaError(null)
     try {
-      const { error } = await supabase.auth.mfa.unenroll({ factorId: verifiedFactorId })
-      if (error) throw error
+      const controller = new AbortController()
+      const timeout = setTimeout(() => controller.abort(), 30_000)
+      const res = await fetch('/api/v1/mfa/send-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(await getAuthHeader()) },
+        signal: controller.signal,
+      })
+      clearTimeout(timeout)
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok || data.success === false) throw new Error(data.error || 'Failed to send verification email')
+      setOtpSent(true)
+      setOtpMaskedEmail(data.email || '')
+      setDevOtpCode(data.devCode || '')
+    } catch (err: any) {
+      const msg = err?.name === 'AbortError'
+        ? 'Request timed out. Please try again.'
+        : (err?.message || 'Failed to send verification email. Please try again.')
+      setMfaError(msg)
+    } finally {
+      setOtpSending(false)
+    }
+  }
+
+  const submitDisable = async () => {
+    if (!verifiedFactorId || !mfaMethod) return
+    const code = mfaCode.trim()
+    if (code.length < 6) {
+      setMfaError(
+        mfaMethod === 'email'
+          ? 'Enter the 6-digit code sent to your email.'
+          : 'Enter the 6-digit code from your authenticator.',
+      )
+      return
+    }
+    setMfaWorking(true)
+    setMfaError(null)
+    try {
+      if (verifiedFactorId.startsWith('local:')) {
+        const localFactor = getLocalMfaFactor(supabaseUser?.id)
+        const valid = localFactor ? await verifyTotpCode(localFactor.secret, code) : false
+        if (!valid) {
+          setMfaError('Invalid authenticator code. Please try again.')
+          setMfaCode('')
+          return
+        }
+
+        deleteLocalMfaFactor(supabaseUser?.id)
+        setSecurity({ ...security, twoFactorEnabled: false })
+        setVerifiedFactorId(null)
+        closeMfaPrompt()
+        toast.success('2FA disabled', 'Two-factor authentication has been turned off')
+        return
+      }
+
+      const controller = new AbortController()
+      const timeout = setTimeout(() => controller.abort(), 30_000)
+      const res = await fetch('/api/v1/mfa/disable', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(await getAuthHeader()) },
+        body: JSON.stringify({
+          userId: supabaseUser?.id,
+          factorId: verifiedFactorId,
+          code,
+          method: mfaMethod,
+        }),
+        signal: controller.signal,
+      })
+      clearTimeout(timeout)
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok || data.success === false) {
+        setMfaError(data.error || 'Verification failed. Please try again.')
+        setMfaCode('')
+        return
+      }
       setSecurity({ ...security, twoFactorEnabled: false })
       setVerifiedFactorId(null)
+      closeMfaPrompt()
       toast.success('2FA disabled', 'Two-factor authentication has been turned off')
     } catch (err: any) {
-      toast.error('Could not disable 2FA', err?.message || 'Please try again')
+      const msg = err?.name === 'AbortError'
+        ? 'Request timed out. Please try again.'
+        : (err?.message || 'Something went wrong. Please try again.')
+      setMfaError(msg)
+    } finally {
+      setMfaWorking(false)
+    }
+  }
+
+  const submitRegenerate = async () => {
+    if (!verifiedFactorId) return
+    const code = mfaCode.trim()
+    if (code.length < 6) {
+      setMfaError('Enter the 6-digit code from your authenticator.')
+      return
+    }
+    setMfaWorking(true)
+    setMfaError(null)
+    try {
+      if (verifiedFactorId.startsWith('local:')) {
+        const localFactor = getLocalMfaFactor(supabaseUser?.id)
+        const valid = localFactor ? await verifyTotpCode(localFactor.secret, code) : false
+        if (!valid) {
+          setMfaError('Invalid authenticator code. Please try again.')
+          setMfaCode('')
+          return
+        }
+
+        deleteLocalMfaFactor(supabaseUser?.id)
+        setSecurity({ ...security, twoFactorEnabled: false })
+        setVerifiedFactorId(null)
+        closeMfaPrompt()
+        toast.success('2FA removed', 'Redirecting to set up a new authenticator...')
+        router.push('/mfa-setup')
+        return
+      }
+
+      const res = await fetch('/api/v1/mfa/disable', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(await getAuthHeader()) },
+        body: JSON.stringify({
+          userId: supabaseUser?.id,
+          factorId: verifiedFactorId,
+          code,
+          method: 'totp',
+        }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setMfaError(data.error || 'Invalid code. Try the latest code from your authenticator.')
+        setMfaCode('')
+        return
+      }
+      setSecurity({ ...security, twoFactorEnabled: false })
+      setVerifiedFactorId(null)
+      closeMfaPrompt()
+      toast.success('2FA removed', 'Redirecting to set up a new authenticator…')
+      router.push('/mfa-setup')
+    } catch (err: any) {
+      setMfaError(err?.message || 'Something went wrong. Please try again.')
+    } finally {
+      setMfaWorking(false)
     }
   }
 
@@ -159,6 +345,7 @@ export default function SettingsPage() {
   })
   const [savingToken, setSavingToken] = useState(false)
   const [validatingToken, setValidatingToken] = useState(false)
+  const maskedToken = '****************'
 
   // Load GitHub token status from backend (NEVER loads actual token)
   useEffect(() => {
@@ -167,9 +354,7 @@ export default function SettingsPage() {
       
       try {
         const response = await fetch('/api/v1/integrations/github/token/status', {
-          headers: {
-            'Authorization': `Bearer ${await supabase.auth.getSession().then(s => s.data.session?.access_token)}`
-          }
+          headers: getAuthHeaders(),
         })
         
         if (response.ok) {
@@ -178,7 +363,7 @@ export default function SettingsPage() {
             ...prev,
             githubConnected: data.configured,
             // Token is NEVER returned from backend for security
-            githubToken: data.configured ? '••••••••••••••••' : '',
+            githubToken: data.configured ? maskedToken : '',
           }))
         }
       } catch (error) {
@@ -198,7 +383,7 @@ export default function SettingsPage() {
     const tokenValue = provider === 'github' ? integrations.githubToken : integrations.gitlabToken
     
     // Don't save masked placeholder
-    if (tokenValue === '••••••••••••••••') {
+    if (tokenValue === maskedToken) {
       toast.info('No changes', 'Token is already configured')
       return
     }
@@ -212,14 +397,11 @@ export default function SettingsPage() {
     setSavingToken(true)
     
     try {
-      const session = await supabase.auth.getSession()
-      const accessToken = session.data.session?.access_token
-      
       const response = await fetch('/api/v1/integrations/github/token', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${accessToken}`
+          ...getAuthHeaders(),
         },
         body: JSON.stringify({ token: tokenValue })
       })
@@ -234,7 +416,7 @@ export default function SettingsPage() {
       setIntegrations(prev => ({
         ...prev,
         githubConnected: true,
-        githubToken: '••••••••••••••••', // Never show actual token
+        githubToken: maskedToken, // Never show actual token
       }))
     } catch (error: any) {
       toast.error('Error', error.message || `Failed to save ${provider} token`)
@@ -250,14 +432,9 @@ export default function SettingsPage() {
     setSavingToken(true)
     
     try {
-      const session = await supabase.auth.getSession()
-      const accessToken = session.data.session?.access_token
-      
       const response = await fetch('/api/v1/integrations/github/token', {
         method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${accessToken}`
-        }
+        headers: getAuthHeaders(),
       })
       
       if (!response.ok) {
@@ -284,14 +461,9 @@ export default function SettingsPage() {
     setValidatingToken(true)
     
     try {
-      const session = await supabase.auth.getSession()
-      const accessToken = session.data.session?.access_token
-      
       const response = await fetch('/api/v1/integrations/github/token/validate', {
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${accessToken}`
-        }
+        headers: getAuthHeaders(),
       })
       
       const data = await response.json()
@@ -671,15 +843,16 @@ export default function SettingsPage() {
                                       <Download className="w-4 h-4 mr-2" />
                                       View backup codes
                                     </Button>
-                                    <Link href="/mfa-setup">
-                                      <Button variant="secondary">
-                                        <RefreshCw className="w-4 h-4 mr-2" />
-                                        Regenerate
-                                      </Button>
-                                    </Link>
                                     <Button
                                       variant="secondary"
-                                      onClick={disableTwoFactor}
+                                      onClick={() => openMfaPrompt('regenerate')}
+                                    >
+                                      <RefreshCw className="w-4 h-4 mr-2" />
+                                      Regenerate
+                                    </Button>
+                                    <Button
+                                      variant="secondary"
+                                      onClick={() => openMfaPrompt('disable')}
                                       className="hover:bg-red-500/10 hover:text-red-500"
                                     >
                                       <X className="w-4 h-4 mr-2" />
@@ -831,7 +1004,7 @@ export default function SettingsPage() {
                               </div>
                               <Button 
                                 onClick={() => handleSaveToken('github')} 
-                                disabled={savingToken || integrations.githubToken === '••••••••••••••••'}
+                                disabled={savingToken || integrations.githubToken === maskedToken}
                               >
                                 {savingToken ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                                 <span className="ml-2">Save</span>
@@ -1120,6 +1293,295 @@ export default function SettingsPage() {
           </div>
         </main>
       </div>
+
+      <Modal
+        isOpen={mfaAction !== null}
+        onClose={() => (mfaWorking ? null : closeMfaPrompt())}
+        title={
+          mfaAction === 'disable'
+            ? 'Disable two-factor auth'
+            : 'Regenerate two-factor auth'
+        }
+        description={
+          mfaAction === 'disable' && !mfaMethod
+            ? 'Choose how to verify your identity.'
+            : mfaAction === 'disable' && mfaMethod === 'email' && otpSent
+            ? devOtpCode
+              ? 'Email is not configured locally. Use the development code shown below.'
+              : `We sent a 6-digit code to ${otpMaskedEmail || 'your email'}.`
+            : mfaAction === 'disable' && mfaMethod === 'email'
+            ? "We'll send a one-time code to your registered email."
+            : mfaAction === 'disable' && mfaMethod === 'totp'
+            ? 'Enter the current code from your authenticator app.'
+            : 'Enter your current authenticator code to replace the existing factor.'
+        }
+        size="sm"
+      >
+        {/* ── Disable: method picker ── */}
+        {mfaAction === 'disable' && !mfaMethod && (
+          <div className="space-y-3">
+            <button
+              type="button"
+              onClick={() => setMfaMethod('email')}
+              className="flex w-full items-center gap-3 rounded-lg border border-[var(--border-color)] bg-[var(--bg-tertiary)] p-4 text-left transition-colors hover:border-[var(--accent)]"
+            >
+              <div className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-blue-500/10">
+                <Mail className="h-5 w-5 text-blue-400" />
+              </div>
+              <div>
+                <p className="text-sm font-medium text-[var(--text-primary)]">
+                  Email verification code
+                </p>
+                <p className="text-xs text-[var(--text-muted)]">
+                  We&apos;ll send a 6-digit code to your registered email
+                </p>
+              </div>
+            </button>
+            <button
+              type="button"
+              onClick={() => setMfaMethod('totp')}
+              className="flex w-full items-center gap-3 rounded-lg border border-[var(--border-color)] bg-[var(--bg-tertiary)] p-4 text-left transition-colors hover:border-[var(--accent)]"
+            >
+              <div className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-emerald-500/10">
+                <Smartphone className="h-5 w-5 text-emerald-400" />
+              </div>
+              <div>
+                <p className="text-sm font-medium text-[var(--text-primary)]">
+                  Authenticator code
+                </p>
+                <p className="text-xs text-[var(--text-muted)]">
+                  Enter the code from Google Authenticator, Authy, etc.
+                </p>
+              </div>
+            </button>
+            <div className="flex justify-end pt-1">
+              <Button variant="secondary" onClick={closeMfaPrompt}>
+                Cancel
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {/* ── Disable via email: send step ── */}
+        {mfaAction === 'disable' && mfaMethod === 'email' && !otpSent && (
+          <div className="space-y-4">
+            <div className="rounded-lg border border-blue-500/20 bg-blue-500/10 p-3">
+              <p className="text-xs text-blue-400">
+                <Mail className="mr-1 inline h-3 w-3" />
+                A 6-digit code will be sent to your registered email address.
+              </p>
+            </div>
+            {mfaError && <p className="text-xs text-red-400">{mfaError}</p>}
+            <div className="flex justify-end gap-2">
+              <Button
+                variant="secondary"
+                onClick={() => { setMfaMethod(null); setMfaError(null) }}
+              >
+                Back
+              </Button>
+              <Button onClick={sendEmailOtp} disabled={otpSending}>
+                {otpSending ? (
+                  <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                ) : (
+                  <Mail className="w-4 h-4 mr-2" />
+                )}
+                Send code
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {/* ── Disable via email: verify step ── */}
+        {mfaAction === 'disable' && mfaMethod === 'email' && otpSent && (
+          <div className="space-y-4">
+            <div>
+              <label className="block text-xs font-medium text-[var(--text-muted)]">
+                Email verification code
+              </label>
+              {devOtpCode && (
+                <div className="mb-3 rounded-lg border border-amber-500/20 bg-amber-500/10 p-3">
+                  <p className="text-xs text-amber-300">
+                    Email sending is not configured. Development code:
+                    <span className="ml-2 font-mono text-sm font-semibold tracking-[0.25em] text-amber-100">
+                      {devOtpCode}
+                    </span>
+                  </p>
+                </div>
+              )}
+              <input
+                autoFocus
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                maxLength={8}
+                value={mfaCode}
+                onChange={(e) => {
+                  setMfaCode(e.target.value.replace(/\D/g, ''))
+                  if (mfaError) setMfaError(null)
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') { e.preventDefault(); submitDisable() }
+                }}
+                placeholder="123456"
+                className={`mt-1 w-full rounded-lg border bg-[var(--bg-tertiary)] px-3 py-2 text-center text-lg font-mono tracking-[0.4em] text-[var(--text-primary)] focus:outline-none ${
+                  mfaError
+                    ? 'border-red-500 focus:border-red-500'
+                    : 'border-[var(--border-color)] focus:border-[var(--accent)]'
+                }`}
+              />
+              {mfaError ? (
+                <p className="mt-2 text-xs text-red-400">{mfaError}</p>
+              ) : (
+                <p className="mt-2 text-xs text-[var(--text-muted)]">
+                  Check your inbox and enter the 6-digit code. It expires in 5 minutes.
+                </p>
+              )}
+            </div>
+            <div className="flex items-center justify-between">
+              <button
+                type="button"
+                onClick={sendEmailOtp}
+                disabled={otpSending}
+                className="text-xs text-[var(--accent)] hover:underline disabled:opacity-50"
+              >
+                {otpSending ? 'Sending…' : 'Resend code'}
+              </button>
+              <div className="flex gap-2">
+                <Button variant="secondary" onClick={closeMfaPrompt} disabled={mfaWorking}>
+                  Cancel
+                </Button>
+                <Button
+                  onClick={submitDisable}
+                  disabled={mfaWorking || mfaCode.trim().length < 6}
+                  className="hover:bg-red-500/10 hover:text-red-500"
+                >
+                  {mfaWorking ? (
+                    <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                  ) : (
+                    <X className="w-4 h-4 mr-2" />
+                  )}
+                  Disable 2FA
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── Disable via authenticator code ── */}
+        {mfaAction === 'disable' && mfaMethod === 'totp' && (
+          <div className="space-y-4">
+            <div>
+              <label className="block text-xs font-medium text-[var(--text-muted)]">
+                Authenticator code
+              </label>
+              <input
+                autoFocus
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                maxLength={8}
+                value={mfaCode}
+                onChange={(e) => {
+                  setMfaCode(e.target.value.replace(/\D/g, ''))
+                  if (mfaError) setMfaError(null)
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') { e.preventDefault(); submitDisable() }
+                }}
+                placeholder="123456"
+                className={`mt-1 w-full rounded-lg border bg-[var(--bg-tertiary)] px-3 py-2 text-center text-lg font-mono tracking-[0.4em] text-[var(--text-primary)] focus:outline-none ${
+                  mfaError
+                    ? 'border-red-500 focus:border-red-500'
+                    : 'border-[var(--border-color)] focus:border-[var(--accent)]'
+                }`}
+              />
+              {mfaError ? (
+                <p className="mt-2 text-xs text-red-400">{mfaError}</p>
+              ) : (
+                <p className="mt-2 text-xs text-[var(--text-muted)]">
+                  Open your authenticator app and enter the current 6-digit code.
+                </p>
+              )}
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button
+                variant="secondary"
+                onClick={() => { setMfaMethod(null); setMfaCode(''); setMfaError(null) }}
+                disabled={mfaWorking}
+              >
+                Back
+              </Button>
+              <Button
+                onClick={submitDisable}
+                disabled={mfaWorking || mfaCode.trim().length < 6}
+                className="hover:bg-red-500/10 hover:text-red-500"
+              >
+                {mfaWorking ? (
+                  <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                ) : (
+                  <X className="w-4 h-4 mr-2" />
+                )}
+                Disable 2FA
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {/* ── Regenerate: always authenticator code ── */}
+        {mfaAction === 'regenerate' && (
+          <div className="space-y-4">
+            <div>
+              <label className="block text-xs font-medium text-[var(--text-muted)]">
+                Authenticator code
+              </label>
+              <input
+                autoFocus
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                maxLength={8}
+                value={mfaCode}
+                onChange={(e) => {
+                  setMfaCode(e.target.value.replace(/\D/g, ''))
+                  if (mfaError) setMfaError(null)
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') { e.preventDefault(); submitRegenerate() }
+                }}
+                placeholder="123456"
+                className={`mt-1 w-full rounded-lg border bg-[var(--bg-tertiary)] px-3 py-2 text-center text-lg font-mono tracking-[0.4em] text-[var(--text-primary)] focus:outline-none ${
+                  mfaError
+                    ? 'border-red-500 focus:border-red-500'
+                    : 'border-[var(--border-color)] focus:border-[var(--accent)]'
+                }`}
+              />
+              {mfaError ? (
+                <p className="mt-2 text-xs text-red-400">{mfaError}</p>
+              ) : (
+                <p className="mt-2 text-xs text-[var(--text-muted)]">
+                  Open your authenticator app and enter the current 6-digit code.
+                </p>
+              )}
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="secondary" onClick={closeMfaPrompt} disabled={mfaWorking}>
+                Cancel
+              </Button>
+              <Button
+                onClick={submitRegenerate}
+                disabled={mfaWorking || mfaCode.trim().length < 6}
+              >
+                {mfaWorking ? (
+                  <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                ) : (
+                  <RefreshCw className="w-4 h-4 mr-2" />
+                )}
+                Continue
+              </Button>
+            </div>
+          </div>
+        )}
+      </Modal>
     </div>
   )
 }

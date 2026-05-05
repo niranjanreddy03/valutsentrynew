@@ -42,7 +42,7 @@ const navigation: NavItem[] = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
   { name: 'Repositories', href: '/repositories', icon: FolderGit2 },
   { name: 'S3 Buckets', href: '/s3-buckets', icon: Cloud, feature: 'aws_integration' },
-  { name: 'Detection', href: '/scans', icon: Radar },
+  { name: 'Scans', href: '/scans', icon: Radar },
   { name: 'Findings', href: '/secrets', icon: ShieldAlert },
   { name: 'ML Insights', href: '/insights', icon: Brain },
   { name: 'Policies', href: '/policies', icon: Scale },

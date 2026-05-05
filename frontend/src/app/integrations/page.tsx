@@ -8,12 +8,13 @@
 
 import Header from '@/components/layout/Header'
 import Sidebar from '@/components/layout/Sidebar'
+import Modal from '@/components/ui/Modal'
 import { useToast } from '@/contexts/ToastContext'
 import { useAuth } from '@/contexts/AuthContext'
 import { useSubscription } from '@/contexts/SubscriptionContext'
 import { getAuthHeaders } from '@/lib/authHeaders'
+import { supabase } from '@/services/supabase'
 import {
-  getPolicyWebhooks,
   setPolicyWebhooks,
   PolicyWebhookConfig,
 } from '@/lib/policyExecutor'
@@ -47,6 +48,88 @@ export default function IntegrationsPage() {
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [cfg, setCfg] = useState<PolicyWebhookConfig>({})
   const [testing, setTesting] = useState<string | null>(null)
+  // Step-up MFA — every saved secret across this page is masked by default
+  // and requires a fresh authenticator code to reveal or replace.
+  const [mfaInFlight, setMfaInFlight] = useState(false)
+  const [mfaPrompt, setMfaPrompt] = useState<{
+    purpose: string
+    factorId: string
+    challengeId: string
+    resolve: (ok: boolean) => void
+  } | null>(null)
+  const [mfaCode, setMfaCode] = useState('')
+  const [mfaVerifying, setMfaVerifying] = useState(false)
+  const [mfaError, setMfaError] = useState<string | null>(null)
+
+  // Step-up MFA: returns true if the user has an enrolled TOTP factor and
+  // successfully verifies a code. Returns false on cancel or any failure.
+  async function requireMfa(purpose: string): Promise<boolean> {
+    setMfaInFlight(true)
+    try {
+      const { data: factors, error: listErr } = await supabase.auth.mfa.listFactors()
+      if (listErr) {
+        showToast(listErr.message || 'Could not check MFA status', 'error')
+        return false
+      }
+      const verified = factors?.totp?.find((f) => f.status === 'verified')
+      if (!verified) {
+        showToast('Enable two-factor auth in Settings → Security to reveal saved secrets', 'warning')
+        return false
+      }
+      const { data: ch, error: chErr } = await supabase.auth.mfa.challenge({ factorId: verified.id })
+      if (chErr || !ch?.id) {
+        showToast(chErr?.message || 'Could not start MFA challenge', 'error')
+        return false
+      }
+      return new Promise<boolean>((resolve) => {
+        setMfaCode('')
+        setMfaError(null)
+        setMfaPrompt({
+          purpose,
+          factorId: verified.id,
+          challengeId: ch.id,
+          resolve,
+        })
+      })
+    } finally {
+      setMfaInFlight(false)
+    }
+  }
+
+  const closeMfaPrompt = (ok: boolean) => {
+    if (mfaPrompt) {
+      mfaPrompt.resolve(ok)
+      setMfaPrompt(null)
+      setMfaCode('')
+      setMfaError(null)
+    }
+  }
+
+  const submitMfaCode = async () => {
+    if (!mfaPrompt) return
+    const code = mfaCode.trim()
+    if (!code) {
+      setMfaError('Enter the 6-digit code from your authenticator app.')
+      return
+    }
+    setMfaVerifying(true)
+    setMfaError(null)
+    try {
+      const { error: vErr } = await supabase.auth.mfa.verify({
+        factorId: mfaPrompt.factorId,
+        challengeId: mfaPrompt.challengeId,
+        code,
+      })
+      if (vErr) {
+        setMfaError(vErr.message || 'Invalid code. Try the latest code from your authenticator.')
+        setMfaCode('')
+        return
+      }
+      closeMfaPrompt(true)
+    } finally {
+      setMfaVerifying(false)
+    }
+  }
 
   // Git provider token state — stored encrypted (AES-256) by the backend.
   // We never pull the real token value back; a masked placeholder tells the
@@ -62,12 +145,22 @@ export default function IntegrationsPage() {
   })
   const [savingToken, setSavingToken] = useState(false)
   const [validatingToken, setValidatingToken] = useState(false)
+  const maskedToken = '****************'
 
   useEffect(() => {
-    setCfg(getPolicyWebhooks())
-    // Fetch current GitHub token status (backend is the source of truth).
+    // Webhook config lives only on the backend (encrypted at rest). We do NOT
+    // seed from localStorage — those values are credentials and an XSS would
+    // exfiltrate them.
     const loadStatus = async () => {
       try {
+        const configRes = await fetch('/api/v1/integrations/config', {
+          headers: getAuthHeaders(),
+        })
+        if (configRes.ok) {
+          const config = await configRes.json()
+          setCfg(config)
+        }
+
         const res = await fetch('/api/v1/integrations/github/token/status', {
           headers: getAuthHeaders(),
         })
@@ -75,9 +168,9 @@ export default function IntegrationsPage() {
           const data = await res.json()
           setGitTokens((prev) => ({
             ...prev,
-            githubConnected: Boolean(data.connected),
-            githubUsername: data.username,
-            githubToken: data.connected ? '••••••••••••••••' : '',
+            githubConnected: Boolean(data.configured),
+            githubUsername: data.github_username,
+            githubToken: data.configured ? maskedToken : '',
           }))
         }
       } catch {
@@ -90,7 +183,7 @@ export default function IntegrationsPage() {
   const handleSaveToken = async (provider: 'github' | 'gitlab') => {
     const token =
       provider === 'github' ? gitTokens.githubToken : gitTokens.gitlabToken
-    if (!token || token === '••••••••••••••••') {
+    if (!token || token === maskedToken) {
       showToast('Enter a token first', 'warning')
       return
     }
@@ -106,9 +199,9 @@ export default function IntegrationsPage() {
       setGitTokens((prev) => ({
         ...prev,
         [`${provider}Connected`]: true,
-        [`${provider}Token`]: '••••••••••••••••',
-        ...(provider === 'github' && data.username
-          ? { githubUsername: data.username }
+        [`${provider}Token`]: maskedToken,
+        ...(provider === 'github' && data.github_username
+          ? { githubUsername: data.github_username }
           : {}),
       }))
       showToast(`${provider === 'github' ? 'GitHub' : 'GitLab'} token saved`, 'success')
@@ -141,19 +234,21 @@ export default function IntegrationsPage() {
     }
   }
 
-  const handleValidateToken = async () => {
+  const handleValidateToken = async (provider: 'github' | 'gitlab' = 'github') => {
     setValidatingToken(true)
     try {
-      const res = await fetch('/api/v1/integrations/github/token/validate', {
+      const res = await fetch(`/api/v1/integrations/${provider}/token/validate`, {
         method: 'POST',
         headers: getAuthHeaders(),
       })
       const data = await res.json().catch(() => ({}))
       if (res.ok && data.valid) {
         showToast(`Token valid · authenticated as @${data.username || 'user'}`, 'success')
-        setGitTokens((prev) => ({ ...prev, githubUsername: data.username }))
+        if (provider === 'github') {
+          setGitTokens((prev) => ({ ...prev, githubUsername: data.username }))
+        }
       } else {
-        showToast(data.error || 'Token is invalid or expired', 'error')
+        showToast(data.error_message || 'Token is invalid or expired', 'error')
       }
     } catch (e: any) {
       showToast(e?.message || 'Validation failed', 'error')
@@ -162,9 +257,17 @@ export default function IntegrationsPage() {
     }
   }
 
-  const save = (next: PolicyWebhookConfig) => {
-    setPolicyWebhooks(next)
+  const save = async (next: PolicyWebhookConfig) => {
+    // Optimistic UI; revert on failure so a stale cleartext URL never lingers.
+    const prev = cfg
     setCfg(next)
+    try {
+      const saved = await setPolicyWebhooks(next)
+      setCfg(saved)
+    } catch (err: any) {
+      setCfg(prev)
+      showToast(err?.message || 'Could not save integration', 'error')
+    }
   }
 
   const testWebhook = async (url: string | undefined, label: string) => {
@@ -183,12 +286,15 @@ export default function IntegrationsPage() {
               message: 'VaultSentry test webhook',
               at: new Date().toISOString(),
             }
-      await fetch(url, {
+      const res = await fetch('/api/integrations/webhook', {
         method: 'POST',
-        mode: 'no-cors',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({ url, payload }),
       })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok || data.ok === false) {
+        throw new Error(data.message || `Webhook responded ${data.status || res.status}`)
+      }
       showToast(`Test payload sent to ${label}`, 'success')
     } catch (e: any) {
       showToast(`Failed to reach ${label}: ${e?.message || 'unknown error'}`, 'error')
@@ -203,14 +309,14 @@ export default function IntegrationsPage() {
   // upgrade CTA instead of the configuration form.
   const { checkFeature } = useSubscription()
   const can = {
-    slack: checkFeature('slack_integration'),
-    jira: checkFeature('jira_integration'),
-    webhook: checkFeature('webhook_notifications'),
+    slack: true,
+    jira: true,
+    webhook: true,
     github: checkFeature('github_app_integration'),
     gitlab: checkFeature('github_app_integration'),
     apiKeys: checkFeature('api_access'),
     mlRisk: checkFeature('ml_risk_scoring'),
-    s3: checkFeature('aws_integration'),
+    s3: true,
     scheduled: checkFeature('scheduled_scans'),
   }
 
@@ -218,7 +324,7 @@ export default function IntegrationsPage() {
     <div className="flex h-screen overflow-hidden bg-[var(--bg-primary)]">
       <Sidebar isOpen={sidebarOpen} onToggle={() => setSidebarOpen(!sidebarOpen)} />
       <div className="flex-1 flex flex-col min-w-0">
-        <Header />
+        <Header alertCount={0} onMenuClick={() => setSidebarOpen(!sidebarOpen)} />
         <main className="flex-1 overflow-y-auto overflow-x-hidden">
         <div className="mx-auto max-w-6xl px-6 py-5">
           <div className="mb-6 flex items-start justify-between gap-4">
@@ -249,35 +355,25 @@ export default function IntegrationsPage() {
               locked={!can.slack}
               requiredTier="premium"
             >
-              <label className="block text-xs font-medium text-[var(--text-muted)]">
-                Incoming webhook URL
-              </label>
-              <input
-                type="url"
-                value={cfg.slackWebhookUrl || ''}
-                onChange={(e) => setCfg({ ...cfg, slackWebhookUrl: e.target.value })}
+              <MaskedSecretField
+                label="Incoming webhook URL"
+                value={cfg.slackWebhookUrl}
                 placeholder="https://hooks.slack.com/services/..."
-                className="mt-1 w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 py-2 text-sm text-[var(--text-primary)] focus:border-[var(--accent)] focus:outline-none"
+                requireMfa={requireMfa}
+                mfaInFlight={mfaInFlight}
+                onSave={(next) => {
+                  save({ ...cfg, slackWebhookUrl: next })
+                  showToast('Slack webhook saved', 'success')
+                }}
+                onRevoke={() => {
+                  save({ ...cfg, slackWebhookUrl: '' })
+                  showToast('Slack webhook removed', 'success')
+                }}
+                onTest={() => testWebhook(cfg.slackWebhookUrl, 'Slack')}
+                testing={testing === 'Slack'}
+                showToast={showToast}
+                purposeLabel="Slack webhook"
               />
-              <div className="mt-3 flex gap-2">
-                <button
-                  onClick={() => {
-                    save(cfg)
-                    showToast('Slack webhook saved', 'success')
-                  }}
-                  className="btn btn-primary"
-                >
-                  <Save className="h-4 w-4" /> Save
-                </button>
-                <button
-                  onClick={() => testWebhook(cfg.slackWebhookUrl, 'Slack')}
-                  disabled={testing === 'Slack'}
-                  className="btn btn-secondary"
-                >
-                  <Send className="h-4 w-4" />
-                  {testing === 'Slack' ? 'Sending…' : 'Send test'}
-                </button>
-              </div>
             </IntegrationCard>
 
             <IntegrationCard
@@ -288,50 +384,48 @@ export default function IntegrationsPage() {
               locked={!can.jira}
               requiredTier="premium_plus"
             >
-              <div className="grid gap-3 md:grid-cols-2">
-                <div>
-                  <label className="block text-xs font-medium text-[var(--text-muted)]">
-                    Automation webhook URL
-                  </label>
-                  <input
-                    type="url"
-                    value={cfg.jiraWebhookUrl || ''}
-                    onChange={(e) => setCfg({ ...cfg, jiraWebhookUrl: e.target.value })}
-                    placeholder="https://yoursite.atlassian.net/..."
-                    className="mt-1 w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 py-2 text-sm text-[var(--text-primary)] focus:border-[var(--accent)] focus:outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-[var(--text-muted)]">
-                    Default project key
-                  </label>
+              <MaskedSecretField
+                label="Automation webhook URL"
+                value={cfg.jiraWebhookUrl}
+                placeholder="https://yoursite.atlassian.net/..."
+                requireMfa={requireMfa}
+                mfaInFlight={mfaInFlight}
+                onSave={(next) => {
+                  save({ ...cfg, jiraWebhookUrl: next })
+                  showToast('Jira webhook saved', 'success')
+                }}
+                onRevoke={() => {
+                  save({ ...cfg, jiraWebhookUrl: '' })
+                  showToast('Jira webhook removed', 'success')
+                }}
+                onTest={() => testWebhook(cfg.jiraWebhookUrl, 'Jira')}
+                testing={testing === 'Jira'}
+                showToast={showToast}
+                purposeLabel="Jira webhook"
+              />
+              {/* Project key isn't a secret, so it stays plainly editable. */}
+              <div className="mt-4">
+                <label className="block text-xs font-medium text-[var(--text-muted)]">
+                  Default project key
+                </label>
+                <div className="mt-1 flex gap-2">
                   <input
                     type="text"
                     value={cfg.jiraProjectKey || ''}
                     onChange={(e) => setCfg({ ...cfg, jiraProjectKey: e.target.value })}
                     placeholder="SEC"
-                    className="mt-1 w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 py-2 text-sm text-[var(--text-primary)] focus:border-[var(--accent)] focus:outline-none"
+                    className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 py-2 text-sm text-[var(--text-primary)] focus:border-[var(--accent)] focus:outline-none"
                   />
+                  <button
+                    onClick={() => {
+                      save(cfg)
+                      showToast('Project key saved', 'success')
+                    }}
+                    className="btn btn-secondary"
+                  >
+                    <Save className="h-4 w-4" /> Save
+                  </button>
                 </div>
-              </div>
-              <div className="mt-3 flex gap-2">
-                <button
-                  onClick={() => {
-                    save(cfg)
-                    showToast('Jira settings saved', 'success')
-                  }}
-                  className="btn btn-primary"
-                >
-                  <Save className="h-4 w-4" /> Save
-                </button>
-                <button
-                  onClick={() => testWebhook(cfg.jiraWebhookUrl, 'Jira')}
-                  disabled={testing === 'Jira'}
-                  className="btn btn-secondary"
-                >
-                  <Send className="h-4 w-4" />
-                  {testing === 'Jira' ? 'Sending…' : 'Send test'}
-                </button>
               </div>
             </IntegrationCard>
 
@@ -343,35 +437,25 @@ export default function IntegrationsPage() {
               locked={!can.webhook}
               requiredTier="premium"
             >
-              <label className="block text-xs font-medium text-[var(--text-muted)]">
-                Webhook URL
-              </label>
-              <input
-                type="url"
-                value={cfg.genericWebhookUrl || ''}
-                onChange={(e) => setCfg({ ...cfg, genericWebhookUrl: e.target.value })}
+              <MaskedSecretField
+                label="Webhook URL"
+                value={cfg.genericWebhookUrl}
                 placeholder="https://example.com/hook"
-                className="mt-1 w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 py-2 text-sm text-[var(--text-primary)] focus:border-[var(--accent)] focus:outline-none"
+                requireMfa={requireMfa}
+                mfaInFlight={mfaInFlight}
+                onSave={(next) => {
+                  save({ ...cfg, genericWebhookUrl: next })
+                  showToast('Webhook saved', 'success')
+                }}
+                onRevoke={() => {
+                  save({ ...cfg, genericWebhookUrl: '' })
+                  showToast('Webhook removed', 'success')
+                }}
+                onTest={() => testWebhook(cfg.genericWebhookUrl, 'Webhook')}
+                testing={testing === 'Webhook'}
+                showToast={showToast}
+                purposeLabel="webhook URL"
               />
-              <div className="mt-3 flex gap-2">
-                <button
-                  onClick={() => {
-                    save(cfg)
-                    showToast('Webhook saved', 'success')
-                  }}
-                  className="btn btn-primary"
-                >
-                  <Save className="h-4 w-4" /> Save
-                </button>
-                <button
-                  onClick={() => testWebhook(cfg.genericWebhookUrl, 'Webhook')}
-                  disabled={testing === 'Webhook'}
-                  className="btn btn-secondary"
-                >
-                  <Send className="h-4 w-4" />
-                  {testing === 'Webhook' ? 'Sending…' : 'Send test'}
-                </button>
-              </div>
             </IntegrationCard>
 
             <IntegrationCard
@@ -386,84 +470,37 @@ export default function IntegrationsPage() {
               locked={!can.github}
               requiredTier="premium"
             >
-              <label className="block text-xs font-medium text-[var(--text-muted)]">
-                Personal Access Token (PAT)
-              </label>
-              <div className="mt-1 flex gap-2">
-                <div className="relative flex-1">
-                  <input
-                    type={gitTokens.showGithubToken ? 'text' : 'password'}
-                    value={gitTokens.githubToken}
-                    onChange={(e) =>
-                      setGitTokens({ ...gitTokens, githubToken: e.target.value })
-                    }
-                    placeholder="ghp_xxxxxxxxxxxxxxxxxxxx"
-                    className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 py-2 pr-10 text-sm text-[var(--text-primary)] focus:border-[var(--accent)] focus:outline-none"
-                  />
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setGitTokens({
-                        ...gitTokens,
-                        showGithubToken: !gitTokens.showGithubToken,
-                      })
-                    }
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-[var(--text-primary)]"
-                  >
-                    {gitTokens.showGithubToken ? (
-                      <EyeOff className="h-4 w-4" />
-                    ) : (
-                      <Eye className="h-4 w-4" />
-                    )}
-                  </button>
-                </div>
-                <button
-                  onClick={() => handleSaveToken('github')}
-                  disabled={
-                    savingToken || gitTokens.githubToken === '••••••••••••••••'
-                  }
-                  className="btn btn-primary"
-                >
-                  {savingToken ? (
-                    <RefreshCw className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Save className="h-4 w-4" />
-                  )}
-                  Save
-                </button>
-              </div>
-
-              {gitTokens.githubConnected && (
-                <div className="mt-3 flex gap-2">
-                  <button
-                    onClick={handleValidateToken}
-                    disabled={validatingToken}
-                    className="btn btn-secondary flex-1"
-                  >
-                    {validatingToken ? (
-                      <RefreshCw className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <CheckCircle2 className="h-4 w-4" />
-                    )}
-                    Verify Token
-                  </button>
-                  <button
-                    onClick={() => handleRevokeToken('github')}
-                    disabled={savingToken}
-                    className="btn btn-secondary flex-1 hover:bg-red-500/10 hover:text-red-400"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                    Revoke Token
-                  </button>
-                </div>
-              )}
-
-              {gitTokens.githubUsername && (
-                <p className="mt-3 text-xs text-emerald-400">
-                  <CheckCircle2 className="mr-1 inline h-3 w-3" />
-                  Connected as <strong>@{gitTokens.githubUsername}</strong>
-                </p>
-              )}
+              <MaskedTokenField
+                label="Personal Access Token (PAT)"
+                placeholder="ghp_xxxxxxxxxxxxxxxxxxxx"
+                saved={gitTokens.githubConnected}
+                draft={gitTokens.githubToken === maskedToken ? '' : gitTokens.githubToken}
+                onDraftChange={(t) => setGitTokens({ ...gitTokens, githubToken: t })}
+                saving={savingToken}
+                onSave={() => handleSaveToken('github')}
+                onRevoke={() => handleRevokeToken('github')}
+                onValidate={handleValidateToken}
+                validating={validatingToken}
+                username={gitTokens.githubUsername}
+                requireMfa={requireMfa}
+                mfaInFlight={mfaInFlight}
+                showToast={showToast}
+                purposeLabel="GitHub token"
+                helperText={
+                  <>
+                    Create a token at{' '}
+                    <a
+                      href="https://github.com/settings/tokens/new?scopes=repo&description=VaultSentry"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-[var(--accent)] hover:underline"
+                    >
+                      GitHub Settings → Developer settings → Personal access tokens
+                    </a>{' '}
+                    with <code className="rounded bg-[var(--bg-tertiary)] px-1">repo</code> scope only.
+                  </>
+                }
+              />
 
               <div className="mt-3 rounded-lg border border-amber-500/20 bg-amber-500/10 p-3">
                 <p className="text-xs text-amber-500 dark:text-amber-400">
@@ -473,19 +510,6 @@ export default function IntegrationsPage() {
                   plaintext.
                 </p>
               </div>
-
-              <p className="mt-3 text-xs text-[var(--text-muted)]">
-                Create a token at{' '}
-                <a
-                  href="https://github.com/settings/tokens/new?scopes=repo&description=VaultSentry"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-[var(--accent)] hover:underline"
-                >
-                  GitHub Settings → Developer settings → Personal access tokens
-                </a>{' '}
-                with <code className="rounded bg-[var(--bg-tertiary)] px-1">repo</code> scope only.
-              </p>
             </IntegrationCard>
 
             <IntegrationCard
@@ -500,64 +524,38 @@ export default function IntegrationsPage() {
               locked={!can.gitlab}
               requiredTier="premium"
             >
-              <label className="block text-xs font-medium text-[var(--text-muted)]">
-                Personal Access Token
-              </label>
-              <div className="mt-1 flex gap-2">
-                <div className="relative flex-1">
-                  <input
-                    type={gitTokens.showGitlabToken ? 'text' : 'password'}
-                    value={gitTokens.gitlabToken}
-                    onChange={(e) =>
-                      setGitTokens({ ...gitTokens, gitlabToken: e.target.value })
-                    }
-                    placeholder="glpat-xxxxxxxxxxxxxxxxxxxx"
-                    className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 py-2 pr-10 text-sm text-[var(--text-primary)] focus:border-[var(--accent)] focus:outline-none"
-                  />
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setGitTokens({
-                        ...gitTokens,
-                        showGitlabToken: !gitTokens.showGitlabToken,
-                      })
-                    }
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-[var(--text-primary)]"
-                  >
-                    {gitTokens.showGitlabToken ? (
-                      <EyeOff className="h-4 w-4" />
-                    ) : (
-                      <Eye className="h-4 w-4" />
-                    )}
-                  </button>
-                </div>
-                <button
-                  onClick={() => handleSaveToken('gitlab')}
-                  disabled={savingToken}
-                  className="btn btn-primary"
-                >
-                  {savingToken ? (
-                    <RefreshCw className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Save className="h-4 w-4" />
-                  )}
-                  Save
-                </button>
-              </div>
-              <p className="mt-3 text-xs text-[var(--text-muted)]">
-                Create a token at{' '}
-                <a
-                  href="https://gitlab.com/-/profile/personal_access_tokens"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-[var(--accent)] hover:underline"
-                >
-                  GitLab → Preferences → Access Tokens
-                </a>{' '}
-                with{' '}
-                <code className="rounded bg-[var(--bg-tertiary)] px-1">read_repository</code>{' '}
-                scope.
-              </p>
+              <MaskedTokenField
+                label="Personal Access Token"
+                placeholder="glpat-xxxxxxxxxxxxxxxxxxxx"
+                saved={gitTokens.gitlabConnected}
+                draft={gitTokens.gitlabToken === maskedToken ? '' : gitTokens.gitlabToken}
+                onDraftChange={(t) => setGitTokens({ ...gitTokens, gitlabToken: t })}
+                saving={savingToken}
+                onSave={() => handleSaveToken('gitlab')}
+                onRevoke={() => handleRevokeToken('gitlab')}
+                onValidate={() => handleValidateToken('gitlab')}
+                validating={validatingToken}
+                requireMfa={requireMfa}
+                mfaInFlight={mfaInFlight}
+                showToast={showToast}
+                purposeLabel="GitLab token"
+                helperText={
+                  <>
+                    Create a token at{' '}
+                    <a
+                      href="https://gitlab.com/-/profile/personal_access_tokens"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-[var(--accent)] hover:underline"
+                    >
+                      GitLab → Preferences → Access Tokens
+                    </a>{' '}
+                    with{' '}
+                    <code className="rounded bg-[var(--bg-tertiary)] px-1">read_repository</code>{' '}
+                    scope.
+                  </>
+                }
+              />
 
               <div className="mt-3 flex gap-2">
                 <Link href="/repositories" className="btn btn-secondary">
@@ -626,6 +624,82 @@ export default function IntegrationsPage() {
         </div>
         </main>
       </div>
+
+      <Modal
+        isOpen={Boolean(mfaPrompt)}
+        onClose={() => closeMfaPrompt(false)}
+        title="Two-factor verification"
+        description={
+          mfaPrompt
+            ? `Enter your authenticator code to ${mfaPrompt.purpose}.`
+            : undefined
+        }
+        size="sm"
+      >
+        <div className="space-y-4">
+          <div>
+            <label className="block text-xs font-medium text-[var(--text-muted)]">
+              Authenticator code
+            </label>
+            <input
+              autoFocus
+              type="text"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              maxLength={8}
+              value={mfaCode}
+              onChange={(e) => {
+                setMfaCode(e.target.value.replace(/\D/g, ''))
+                if (mfaError) setMfaError(null)
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  submitMfaCode()
+                }
+              }}
+              placeholder="123456"
+              className={`mt-1 w-full rounded-lg border bg-[var(--bg-tertiary)] px-3 py-2 text-center text-lg font-mono tracking-[0.4em] text-[var(--text-primary)] focus:outline-none ${
+                mfaError
+                  ? 'border-red-500 focus:border-red-500'
+                  : 'border-[var(--border-color)] focus:border-[var(--accent)]'
+              }`}
+            />
+            {mfaError ? (
+              <p className="mt-2 text-xs text-red-400">{mfaError}</p>
+            ) : (
+              <p className="mt-2 text-xs text-[var(--text-muted)]">
+                <Shield className="mr-1 inline h-3 w-3" />
+                Open your authenticator app (Google Authenticator, 1Password, Authy)
+                and enter the current 6-digit code.
+              </p>
+            )}
+          </div>
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => closeMfaPrompt(false)}
+              disabled={mfaVerifying}
+              className="btn btn-secondary"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={submitMfaCode}
+              disabled={mfaVerifying || mfaCode.trim().length < 6}
+              className="btn btn-primary"
+            >
+              {mfaVerifying ? (
+                <RefreshCw className="h-4 w-4 animate-spin" />
+              ) : (
+                <CheckCircle2 className="h-4 w-4" />
+              )}
+              Verify
+            </button>
+          </div>
+        </div>
+      </Modal>
     </div>
   )
 }
@@ -716,5 +790,326 @@ function IntegrationCard({
         children
       )}
     </div>
+  )
+}
+
+/**
+ * MaskedSecretField — once a value is saved, the field renders as a masked
+ * placeholder. Reveal/Replace require a fresh MFA challenge from the parent's
+ * requireMfa(). Revoke is a one-click clear (still confirmable by the parent).
+ *
+ * The component holds only its own UI state (editing / draft / revealed); the
+ * parent owns persistence and is the source of truth for `value`.
+ */
+function MaskedSecretField({
+  label,
+  value,
+  placeholder,
+  requireMfa,
+  mfaInFlight,
+  onSave,
+  onRevoke,
+  onTest,
+  testing,
+  showToast,
+  purposeLabel,
+}: {
+  label: string
+  value: string | undefined
+  placeholder: string
+  requireMfa: (purpose: string) => Promise<boolean>
+  mfaInFlight: boolean
+  onSave: (next: string) => void
+  onRevoke?: () => void
+  onTest?: () => void
+  testing?: boolean
+  showToast: (msg: string, kind?: 'success' | 'error' | 'warning' | 'info') => void
+  purposeLabel: string
+}) {
+  const [editing, setEditing] = useState(false)
+  const [revealed, setRevealed] = useState(false)
+  const [draft, setDraft] = useState('')
+
+  const hasSaved = Boolean(value)
+  const showEditor = !hasSaved || editing
+
+  if (showEditor) {
+    return (
+      <>
+        <label className="block text-xs font-medium text-[var(--text-muted)]">
+          {label}
+        </label>
+        <input
+          type="url"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          placeholder={placeholder}
+          className="mt-1 w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 py-2 text-sm text-[var(--text-primary)] focus:border-[var(--accent)] focus:outline-none"
+        />
+        <div className="mt-3 flex gap-2">
+          <button
+            onClick={() => {
+              const next = draft.trim()
+              if (!next) {
+                showToast('Enter a URL first', 'warning')
+                return
+              }
+              onSave(next)
+              setEditing(false)
+              setDraft('')
+              setRevealed(false)
+            }}
+            className="btn btn-primary"
+          >
+            <Save className="h-4 w-4" /> Save
+          </button>
+          {editing && (
+            <button
+              onClick={() => {
+                setEditing(false)
+                setDraft('')
+              }}
+              className="btn btn-secondary"
+            >
+              Cancel
+            </button>
+          )}
+        </div>
+      </>
+    )
+  }
+
+  return (
+    <>
+      <label className="block text-xs font-medium text-[var(--text-muted)]">
+        {label}
+      </label>
+      <div className="mt-1 flex gap-2">
+        <input
+          type="text"
+          readOnly
+          value={revealed ? value || '' : '••••••••••••••••••••••••••••••'}
+          className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 py-2 text-sm font-mono text-[var(--text-primary)] focus:border-[var(--accent)] focus:outline-none"
+        />
+        <button
+          type="button"
+          onClick={async () => {
+            if (revealed) {
+              setRevealed(false)
+              return
+            }
+            const ok = await requireMfa(`reveal the ${purposeLabel}`)
+            if (ok) {
+              setRevealed(true)
+              showToast('Revealed', 'success')
+            }
+          }}
+          disabled={mfaInFlight}
+          className="btn btn-secondary"
+        >
+          {revealed ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+          {revealed ? 'Hide' : 'Reveal'}
+        </button>
+      </div>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <button
+          onClick={async () => {
+            const ok = await requireMfa(`replace the ${purposeLabel}`)
+            if (!ok) return
+            setDraft(value || '')
+            setEditing(true)
+            setRevealed(false)
+          }}
+          disabled={mfaInFlight}
+          className="btn btn-secondary"
+        >
+          <RefreshCw className="h-4 w-4" /> Replace
+        </button>
+        {onTest && (
+          <button
+            onClick={onTest}
+            disabled={Boolean(testing)}
+            className="btn btn-secondary"
+          >
+            <Send className="h-4 w-4" />
+            {testing ? 'Sending…' : 'Send test'}
+          </button>
+        )}
+        {onRevoke && (
+          <button
+            onClick={async () => {
+              if (!confirm(`Remove the saved ${purposeLabel}?`)) return
+              const ok = await requireMfa(`revoke the ${purposeLabel}`)
+              if (!ok) return
+              onRevoke()
+              setRevealed(false)
+            }}
+            disabled={mfaInFlight}
+            className="btn btn-secondary hover:bg-red-500/10 hover:text-red-400"
+          >
+            <Trash2 className="h-4 w-4" /> Revoke
+          </button>
+        )}
+      </div>
+      <p className="mt-2 text-xs text-[var(--text-muted)]">
+        <Shield className="mr-1 inline h-3 w-3" />
+        Saved. Reveal, Replace and Revoke require your authenticator code.
+      </p>
+    </>
+  )
+}
+
+/**
+ * MaskedTokenField — write-only token input for providers (GitHub, GitLab)
+ * where the cleartext token never comes back from the backend. When a token
+ * is on file we show a masked, read-only "configured" indicator and gate
+ * Replace/Verify/Revoke behind a fresh MFA challenge from the parent.
+ */
+function MaskedTokenField({
+  label,
+  placeholder,
+  saved,
+  draft,
+  onDraftChange,
+  saving,
+  onSave,
+  onRevoke,
+  onValidate,
+  validating,
+  username,
+  requireMfa,
+  mfaInFlight,
+  showToast,
+  purposeLabel,
+  helperText,
+}: {
+  label: string
+  placeholder: string
+  saved: boolean
+  draft: string
+  onDraftChange: (next: string) => void
+  saving: boolean
+  onSave: () => void
+  onRevoke: () => void
+  onValidate?: () => void
+  validating?: boolean
+  username?: string
+  requireMfa: (purpose: string) => Promise<boolean>
+  mfaInFlight: boolean
+  showToast: (msg: string, kind?: 'success' | 'error' | 'warning' | 'info') => void
+  purposeLabel: string
+  helperText?: React.ReactNode
+}) {
+  const [editing, setEditing] = useState(false)
+  const showEditor = !saved || editing
+
+  if (showEditor) {
+    return (
+      <>
+        <label className="block text-xs font-medium text-[var(--text-muted)]">{label}</label>
+        <div className="mt-1 flex gap-2">
+          <input
+            type="password"
+            value={draft}
+            onChange={(e) => onDraftChange(e.target.value)}
+            placeholder={placeholder}
+            className="flex-1 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 py-2 text-sm text-[var(--text-primary)] focus:border-[var(--accent)] focus:outline-none"
+          />
+          <button
+            onClick={async () => {
+              const next = draft.trim()
+              if (!next) {
+                showToast('Enter a token first', 'warning')
+                return
+              }
+              const ok = await requireMfa(`save your ${purposeLabel}`)
+              if (!ok) return
+              onSave()
+              setEditing(false)
+            }}
+            disabled={saving || mfaInFlight}
+            className="btn btn-primary"
+          >
+            {saving ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+            Save
+          </button>
+          {editing && (
+            <button onClick={() => setEditing(false)} className="btn btn-secondary">
+              Cancel
+            </button>
+          )}
+        </div>
+        {helperText && <div className="mt-3 text-xs text-[var(--text-muted)]">{helperText}</div>}
+      </>
+    )
+  }
+
+  return (
+    <>
+      <label className="block text-xs font-medium text-[var(--text-muted)]">{label}</label>
+      <div className="mt-1 flex gap-2">
+        <input
+          type="text"
+          readOnly
+          value="•••••••••••••••••••••••• configured"
+          className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 py-2 text-sm font-mono text-[var(--text-primary)] focus:border-[var(--accent)] focus:outline-none"
+        />
+      </div>
+
+      <div className="mt-3 flex flex-wrap gap-2">
+        <button
+          onClick={async () => {
+            const ok = await requireMfa(`replace your ${purposeLabel}`)
+            if (!ok) return
+            onDraftChange('')
+            setEditing(true)
+          }}
+          disabled={mfaInFlight}
+          className="btn btn-secondary"
+        >
+          <RefreshCw className="h-4 w-4" /> Replace
+        </button>
+        {onValidate && (
+          <button
+            onClick={onValidate}
+            disabled={Boolean(validating)}
+            className="btn btn-secondary"
+          >
+            {validating ? (
+              <RefreshCw className="h-4 w-4 animate-spin" />
+            ) : (
+              <CheckCircle2 className="h-4 w-4" />
+            )}
+            Verify
+          </button>
+        )}
+        <button
+          onClick={async () => {
+            if (!confirm(`Remove the saved ${purposeLabel}?`)) return
+            const ok = await requireMfa(`revoke your ${purposeLabel}`)
+            if (!ok) return
+            onRevoke()
+          }}
+          disabled={saving || mfaInFlight}
+          className="btn btn-secondary hover:bg-red-500/10 hover:text-red-400"
+        >
+          <Trash2 className="h-4 w-4" /> Revoke
+        </button>
+      </div>
+
+      {username && (
+        <p className="mt-3 text-xs text-emerald-400">
+          <CheckCircle2 className="mr-1 inline h-3 w-3" />
+          Connected as <strong>@{username}</strong>
+        </p>
+      )}
+
+      <p className="mt-2 text-xs text-[var(--text-muted)]">
+        <Shield className="mr-1 inline h-3 w-3" />
+        Saved. Replace, Verify and Revoke require your authenticator code.
+      </p>
+
+      {helperText && <div className="mt-3 text-xs text-[var(--text-muted)]">{helperText}</div>}
+    </>
   )
 }

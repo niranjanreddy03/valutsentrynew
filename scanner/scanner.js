@@ -260,12 +260,19 @@ async function scanFile(filePath, options = {}) {
       const lineNumber = lineNumberAt(match.index);
 
       // ── Snippet — line above, the match line, line below ──
+      // SECURITY: redact the matched raw value from the snippet before persisting,
+      // otherwise scan outputs (JSON/HTML) leak the unmasked secret in context.
       const snippetStart = Math.max(0, lineNumber - 2);
       const snippetEnd = Math.min(lines.length - 1, lineNumber);  // lineNumber is 1-based
-      const snippet = lines
+      const maskedForSnippet = maskValue(rawValue);
+      const rawSnippet = lines
         .slice(snippetStart, snippetEnd + 1)
         .map((l, i) => `${snippetStart + i + 1}: ${l}`)
         .join('\n');
+      const snippet =
+        !maskValues || includeRawValue
+          ? rawSnippet
+          : rawSnippet.split(rawValue).join(maskedForSnippet);
 
       /** @type {Finding} */
       const finding = {

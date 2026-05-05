@@ -41,6 +41,10 @@ BITBUCKET_URL_PATTERNS = [
     r'^git@bitbucket\.org:[\w\-\.]+/[\w\-\.]+(?:\.git)?$',
 ]
 
+AZURE_URL_PATTERNS = [
+    r'^https?://dev\.azure\.com/[\w\-\.]+/[\w\-\.]+/_git/[\w\-\.]+/?$',
+]
+
 
 def validate_repository_url(url: str, provider: str) -> tuple[bool, str]:
     """
@@ -70,6 +74,12 @@ def validate_repository_url(url: str, provider: str) -> tuple[bool, str]:
                 return True, ""
         return False, f"Invalid Bitbucket URL format. Expected: https://bitbucket.org/owner/repo"
     
+    elif provider in ("azure", "azure_devops"):
+        for pattern in AZURE_URL_PATTERNS:
+            if re.match(pattern, url, re.IGNORECASE):
+                return True, ""
+        return False, "Invalid Azure DevOps URL format. Expected: https://dev.azure.com/org/project/_git/repo"
+
     # For other providers, basic URL validation
     if not url.startswith(('http://', 'https://', 'git@')):
         return False, "URL must start with http://, https://, or git@"

@@ -2,6 +2,7 @@
 
 import { getSupabaseClient } from '@/lib/supabase/client'
 import type { UpdateUser, User } from '@/lib/supabase/types'
+import { getLocalMfaFactor } from '@/lib/localMfa'
 import { Session, SupabaseClient, User as SupabaseUser } from '@supabase/supabase-js'
 import { useRouter } from 'next/navigation'
 import { createContext, ReactNode, useCallback, useContext, useEffect, useState } from 'react'
@@ -325,17 +326,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return () => {}
     }
 
-    // Listen for auth changes
+    // Listen for auth changes.
+    //
+    // IMPORTANT: never `await` Supabase queries directly inside this callback
+    // — supabase-js processes auth events synchronously while listeners run,
+    // and an awaited query (e.g. fetchUserProfile, mfa.listFactors) inside the
+    // listener will deadlock the response that triggered the event. Defer all
+    // awaits via setTimeout(..., 0) so they run after the listener returns.
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, currentSession) => {
+      (event, currentSession) => {
         console.log('Auth state changed:', event)
-        
+
         setSession(currentSession)
         setSupabaseUser(currentSession?.user ?? null)
 
         if (currentSession?.user) {
-          const profile = await fetchUserProfile(currentSession.user.id)
-          setUser(profile)
+          setTimeout(() => {
+            fetchUserProfile(currentSession.user.id)
+              .then(setUser)
+              .catch((err) => console.warn('[AUTH] fetchUserProfile failed:', err))
+          }, 0)
         } else {
           setUser(null)
         }
@@ -344,26 +354,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (event === 'SIGNED_OUT') {
           router.push('/login')
         } else if (event === 'SIGNED_IN') {
-          // If the user has a verified TOTP factor, require the challenge
-          // before entering the app. MFA_CHALLENGE_VERIFIED lifts the session
-          // to AAL2 and fires SIGNED_IN again — that second firing passes
-          // the check and lands on /.
-          //
-          // We use listFactors() + AAL as a belt-and-braces check because
-          // getAuthenticatorAssuranceLevel alone has been observed returning
-          // stale nextLevel='aal1' right after password sign-in.
-          try {
-            const needsChallenge = await userHasVerifiedMfa(supabase)
-            if (needsChallenge) {
-              router.push('/mfa-challenge')
-              return
-            }
-          } catch (err) {
-            console.warn('[AUTH] MFA check on SIGNED_IN failed:', err)
-          }
-          router.push('/')
+          // Defer the MFA check so we don't block the auth response.
+          setTimeout(() => {
+            userHasVerifiedMfa(supabase)
+              .then((needsChallenge) => {
+                if (needsChallenge) router.push('/mfa-challenge')
+                else router.push('/')
+              })
+              .catch((err) => {
+                console.warn('[AUTH] MFA check on SIGNED_IN failed:', err)
+                router.push('/')
+              })
+          }, 0)
         } else if (event === 'MFA_CHALLENGE_VERIFIED') {
-          router.push('/')
+          // Only redirect to dashboard when this is the post-login MFA gate
+          // (`/mfa-challenge`). For step-up MFA on any other page (settings,
+          // integrations, mfa-setup, etc.) the user should stay where they are.
+          if (typeof window !== 'undefined' && window.location.pathname === '/mfa-challenge') {
+            router.push('/')
+          }
         } else if (event === 'PASSWORD_RECOVERY') {
           router.push('/reset-password')
         }
@@ -403,7 +412,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // Ensure a stale demo flag from an earlier session doesn't bleed into
         // this real account (see note in the Supabase login path).
         localStorage.removeItem('demo_mode')
-        router.push('/')
+        if (getLocalMfaFactor(stored.id)) {
+          router.push('/mfa-challenge')
+        } else {
+          router.push('/')
+        }
         return
       }
 
@@ -502,7 +515,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           } as SupabaseUser)
           localStorage.setItem(LOCAL_SESSION_KEY, JSON.stringify({ userId: stored.id }))
           localStorage.removeItem('demo_mode')
-          router.push('/')
+          if (getLocalMfaFactor(stored.id)) {
+            router.push('/mfa-challenge')
+          } else {
+            router.push('/')
+          }
           return
         }
         throw err

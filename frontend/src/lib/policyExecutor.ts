@@ -16,10 +16,29 @@
  */
 
 import type { Policy, PolicyAction, PolicyFinding, PolicyMatch } from './policyEngine'
+import { getAuthHeaders } from './authHeaders'
 
 const LOG_KEY = 'vaultsentry_policy_executions'
 const WEBHOOKS_KEY = 'vaultsentry_policy_webhooks'
 const LOG_CAP = 50
+
+// Webhook URLs are credentials. They MUST live only on the backend, encrypted
+// with AES-256-GCM (see backend/app/core/encryption.py). Any legacy plaintext
+// blob from earlier builds gets wiped on first import so it cannot be exfil'd
+// via XSS or a stolen device profile.
+function purgeLegacyWebhookStorage(): void {
+  if (typeof window === 'undefined') return
+  try {
+    const s = window.localStorage
+    for (let i = s.length - 1; i >= 0; i--) {
+      const key = s.key(i)
+      if (key && key.startsWith(WEBHOOKS_KEY)) s.removeItem(key)
+    }
+  } catch {
+    /* noop */
+  }
+}
+purgeLegacyWebhookStorage()
 
 export interface PolicyExecution {
   id: string
@@ -52,25 +71,63 @@ function safeStorage(): Storage | null {
   }
 }
 
-export function getPolicyWebhooks(): PolicyWebhookConfig {
-  const s = safeStorage()
-  if (!s) return {}
+function currentUserId(): string {
+  return getAuthHeaders()['x-user-id'] || 'local-user'
+}
+
+function userKey(base: string): string {
+  return `${base}:${currentUserId()}`
+}
+
+function readItemWithMigration(s: Storage, base: string): string | null {
+  const scoped = userKey(base)
+  const value = s.getItem(scoped)
+  if (value !== null) return value
+
+  const legacy = s.getItem(base)
+  if (legacy !== null) {
+    try {
+      s.setItem(scoped, legacy)
+    } catch {
+      /* quota */
+    }
+  }
+  return legacy
+}
+
+// Webhook config is fetched from the backend on demand and never persisted in
+// the browser. The backend stores it AES-256-GCM encrypted; the response only
+// flows to the authenticated user. Callers that already hold a freshly
+// fetched config should pass it via `executeMatches({ webhooks })` to avoid
+// an extra round-trip.
+export async function getPolicyWebhooks(): Promise<PolicyWebhookConfig> {
+  if (typeof window === 'undefined') return {}
   try {
-    const raw = s.getItem(WEBHOOKS_KEY)
-    if (!raw) return {}
-    return JSON.parse(raw) as PolicyWebhookConfig
+    const { getAuthHeaders } = await import('./authHeaders')
+    const res = await fetch('/api/v1/integrations/config', {
+      headers: getAuthHeaders(),
+      cache: 'no-store',
+    })
+    if (!res.ok) return {}
+    return (await res.json()) as PolicyWebhookConfig
   } catch {
     return {}
   }
 }
 
-export function setPolicyWebhooks(cfg: PolicyWebhookConfig): void {
-  const s = safeStorage()
-  if (!s) return
+export async function setPolicyWebhooks(cfg: PolicyWebhookConfig): Promise<PolicyWebhookConfig> {
+  if (typeof window === 'undefined') return cfg
   try {
-    s.setItem(WEBHOOKS_KEY, JSON.stringify(cfg))
-  } catch {
-    /* quota */
+    const { getAuthHeaders } = await import('./authHeaders')
+    const res = await fetch('/api/v1/integrations/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+      body: JSON.stringify(cfg),
+    })
+    if (!res.ok) throw new Error(`Save failed (${res.status})`)
+    return (await res.json()) as PolicyWebhookConfig
+  } catch (err) {
+    throw err
   }
 }
 
@@ -136,14 +193,17 @@ async function postJson(
   body: unknown,
 ): Promise<{ ok: boolean; status: number; message?: string }> {
   try {
-    const res = await fetch(url, {
+    const res = await fetch('/api/integrations/webhook', {
       method: 'POST',
-      // Slack accepts text/plain; no preflight needed in most cases.
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-      mode: 'cors',
+      body: JSON.stringify({ url, payload: body }),
     })
-    return { ok: res.ok, status: res.status }
+    const data = await res.json().catch(() => ({}))
+    return {
+      ok: res.ok && data.ok !== false,
+      status: data.status ?? res.status,
+      message: data.message,
+    }
   } catch (err: any) {
     return { ok: false, status: 0, message: err?.message ?? 'Network error' }
   }
@@ -235,7 +295,7 @@ export async function executeMatches(
   opts: ExecuteOptions = {},
 ): Promise<PolicyExecution[]> {
   if (matches.length === 0) return []
-  const webhooks = opts.webhooks ?? getPolicyWebhooks()
+  const webhooks = opts.webhooks ?? (await getPolicyWebhooks())
   const out: PolicyExecution[] = []
   const nowIso = new Date().toISOString()
 

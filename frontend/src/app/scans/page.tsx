@@ -211,7 +211,7 @@ export default function ScansPage() {
               <div>
                 <h1 className="text-lg font-medium text-[var(--text-primary)]">Scans</h1>
                 <p className="text-xs text-[var(--text-muted)] mt-0.5">
-                  Monitor and manage security scans
+                  Every scan run and its status — start, monitor, and review scanner activity.
                 </p>
               </div>
               <button onClick={() => setShowNewScanModal(true)} className="btn-primary flex items-center px-4 py-2">

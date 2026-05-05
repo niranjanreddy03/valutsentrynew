@@ -7,6 +7,8 @@
  */
 
 const assert = require('assert');
+const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const { scanFile } = require('../scanner');
 const { scanDirectory } = require('../directoryScanner');
@@ -16,6 +18,22 @@ const { ALL_RULES } = require('../rules');
 
 let passed = 0;
 let failed = 0;
+
+async function withTempDir(fn) {
+  const dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'vs-node-scan-'));
+  try {
+    return await fn(dir);
+  } finally {
+    await fs.promises.rm(dir, { recursive: true, force: true });
+  }
+}
+
+function writeFile(root, relativePath, content) {
+  const filePath = path.join(root, relativePath);
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, content, 'utf8');
+  return filePath;
+}
 
 async function test(name, fn) {
   try {
@@ -183,6 +201,45 @@ async function testDirectoryScanner() {
       assert.ok(err.message.includes('Invalid scan target') || err.message.includes('ENOENT'),
         `Unexpected error: ${err.message}`);
     }
+  });
+
+  await test('Scans Java Spring application.properties secrets', async () => {
+    await withTempDir(async (dir) => {
+      writeFile(dir, 'src/main/resources/application.properties', [
+        'spring.datasource.url=jdbc:postgresql://db.example.com:5432/app?user=app&password=R4ndomSpringPassword99',
+        'spring.datasource.password=R4ndomSpringPassword99',
+        'server.ssl.key-store-password=ChangeThisKeystore99',
+      ].join('\n'));
+
+      const summary = await scanDirectory(dir, { useGitignore: true });
+      assert.ok(
+        summary.findings.some((f) => f.ruleId === 'spring-datasource-password'),
+        'Should detect Spring datasource password',
+      );
+      assert.ok(
+        summary.findings.some((f) => f.ruleId === 'java-keystore-password'),
+        'Should detect Java keystore password',
+      );
+      assert.ok(
+        summary.findings.some((f) => f.ruleId === 'jdbc-postgres-connection'),
+        'Should detect JDBC URL with embedded password',
+      );
+    });
+  });
+
+  await test('Scans sensitive config even when gitignored', async () => {
+    await withTempDir(async (dir) => {
+      writeFile(dir, '.gitignore', '.env\nsrc/main/resources/application.properties\n');
+      writeFile(dir, '.env', 'STRIPE_SECRET=sk_test_123456789012345678901234\n');
+      writeFile(dir, 'src/main/resources/application.properties', 'spring.datasource.password=R4ndomSpringPassword99\n');
+
+      const summary = await scanDirectory(dir, { useGitignore: true });
+      assert.ok(summary.findings.some((f) => f.ruleId === 'stripe-key'), 'Should scan .env');
+      assert.ok(
+        summary.findings.some((f) => f.ruleId === 'spring-datasource-password'),
+        'Should scan application.properties',
+      );
+    });
   });
 }
 

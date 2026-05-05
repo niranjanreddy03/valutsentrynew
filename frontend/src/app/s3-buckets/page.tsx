@@ -1,6 +1,5 @@
 'use client'
 
-import FeatureGate from '@/components/FeatureGate'
 import Header from '@/components/layout/Header'
 import Sidebar from '@/components/layout/Sidebar'
 import { useToast } from '@/contexts/ToastContext'
@@ -233,20 +232,8 @@ export default function S3BucketsPage() {
     <div className="flex min-h-screen bg-[var(--bg-primary)]">
       <Sidebar isOpen={sidebarOpen} onToggle={() => setSidebarOpen(!sidebarOpen)} />
       <div className="flex-1">
-        <Header />
+        <Header alertCount={0} onMenuClick={() => setSidebarOpen(!sidebarOpen)} />
         <main className="mx-auto max-w-6xl px-6 py-8">
-          <FeatureGate
-            feature="aws_integration"
-            title="S3 bucket scanning is a Premium Plus feature"
-            description="Scan your AWS S3 buckets for exposed secrets, credentials, and PII — the same engine that protects your repos, pointed at your cloud storage."
-            perks={[
-              'Connect unlimited S3 buckets',
-              'Scan objects on upload (event-driven)',
-              'Entropy + pattern detection on file contents',
-              'Per-bucket remediation playbooks',
-            ]}
-            requiredTier="premium_plus"
-          >
           <div className="mb-8 flex items-start justify-between gap-4">
             <div>
               <h1 className="flex items-center gap-2 text-2xl font-bold text-[var(--text-primary)]">
@@ -461,7 +448,6 @@ export default function S3BucketsPage() {
               ))}
             </div>
           )}
-          </FeatureGate>
         </main>
       </div>
 

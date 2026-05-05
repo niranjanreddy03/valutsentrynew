@@ -68,6 +68,30 @@ function safe(): Storage | null {
   }
 }
 
+function currentUserId(): string {
+  return getAuthHeaders()['x-user-id'] || 'local-user'
+}
+
+function userKey(base: string): string {
+  return `${base}:${currentUserId()}`
+}
+
+function readItemWithMigration(s: Storage, base: string): string | null {
+  const scoped = userKey(base)
+  const value = s.getItem(scoped)
+  if (value !== null) return value
+
+  const legacy = s.getItem(base)
+  if (legacy !== null) {
+    try {
+      s.setItem(scoped, legacy)
+    } catch {
+      /* quota */
+    }
+  }
+  return legacy
+}
+
 function emit(event: string) {
   if (typeof window === 'undefined') return
   window.dispatchEvent(new CustomEvent(event))
@@ -79,8 +103,8 @@ if (typeof window !== 'undefined') {
   const bound = (window as any).__vs_s3_cross_tab_bound__
   if (!bound) {
     window.addEventListener('storage', (e) => {
-      if (e.key === BUCKETS_KEY) emit('vaultsentry:s3-buckets-updated')
-      if (e.key === FINDINGS_KEY) emit('vaultsentry:s3-findings-updated')
+      if (e.key?.startsWith(BUCKETS_KEY)) emit('vaultsentry:s3-buckets-updated')
+      if (e.key?.startsWith(FINDINGS_KEY)) emit('vaultsentry:s3-findings-updated')
     })
     ;(window as any).__vs_s3_cross_tab_bound__ = true
   }
@@ -94,7 +118,7 @@ export function getBuckets(): S3Bucket[] {
   const s = safe()
   if (!s) return []
   try {
-    return JSON.parse(s.getItem(BUCKETS_KEY) || '[]') as S3Bucket[]
+    return JSON.parse(readItemWithMigration(s, BUCKETS_KEY) || '[]') as S3Bucket[]
   } catch {
     return []
   }
@@ -103,7 +127,7 @@ export function getBuckets(): S3Bucket[] {
 export function saveBuckets(list: S3Bucket[]) {
   const s = safe()
   if (!s) return
-  s.setItem(BUCKETS_KEY, JSON.stringify(list))
+  s.setItem(userKey(BUCKETS_KEY), JSON.stringify(list))
   emit('vaultsentry:s3-buckets-updated')
 }
 
@@ -114,7 +138,7 @@ export function saveBuckets(list: S3Bucket[]) {
 function readIndex(): FindingsIndex {
   const s = safe()
   if (!s) return {}
-  const raw = s.getItem(FINDINGS_KEY)
+  const raw = readItemWithMigration(s, FINDINGS_KEY)
   if (!raw) return {}
   try {
     const parsed = JSON.parse(raw)
@@ -137,7 +161,7 @@ function readIndex(): FindingsIndex {
 function writeIndex(idx: FindingsIndex) {
   const s = safe()
   if (!s) return
-  s.setItem(FINDINGS_KEY, JSON.stringify(idx))
+  s.setItem(userKey(FINDINGS_KEY), JSON.stringify(idx))
   emit('vaultsentry:s3-findings-updated')
 }
 
@@ -375,7 +399,7 @@ export async function scanBucket(
     }
   } catch (err: any) {
     if (err?.name === 'AbortError') {
-      updateBucket(bucket.id, { status: bucket.status === 'scanning' ? 'idle' : bucket.status })
+      updateBucket(bucket.id, { status: bucket.status })
       throw err
     }
     findings = simulateScan(bucket)

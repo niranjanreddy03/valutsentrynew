@@ -80,7 +80,7 @@ export async function runPoliciesForScan(opts: {
 
   const alerts: ScanPolicyOutcome['alerts'] = []
   const executions = await executeMatches(evalResult.matches, {
-    webhooks: getPolicyWebhooks(),
+    webhooks: await getPolicyWebhooks(),
     onAlert: (policy, findings) => {
       alerts.push({ policyName: policy.name, findings })
     },

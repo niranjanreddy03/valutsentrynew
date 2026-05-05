@@ -87,7 +87,10 @@ class ScanResultResponse(BaseModel):
 # Helper Functions
 # ============================================
 
-async def get_user_github_token(user_id: str) -> Optional[str]:
+async def get_user_github_token(
+    user_id: str,
+    user_jwt: Optional[str] = None,
+) -> Optional[str]:
     """
     Fetch and decrypt user's GitHub token securely.
     Returns None if not configured or Supabase is not available.
@@ -105,7 +108,10 @@ async def get_user_github_token(user_id: str) -> Optional[str]:
         # Use secure service for encrypted token retrieval
         from app.services.github_token_service import secure_github_service
         
-        token, error = await secure_github_service.get_decrypted_token(str(user_id))
+        token, error = await secure_github_service.get_decrypted_token(
+            str(user_id),
+            user_jwt=user_jwt,
+        )
         
         if token:
             logger.debug(f"[AUTH] Using decrypted user token for user {user_id}")
@@ -589,12 +595,16 @@ async def run_supabase_scan_task(
         
         if not user_id:
             raise Exception(f"Could not find scan record or user_id for scan {scan_id}")
+
+        user_github_token = await get_user_github_token(str(user_id), user_access_token)
+        if user_github_token:
+            logger.info(f"[SCAN] Using saved GitHub token for user {user_id}")
         
         # Clone repository
         cloned_dir = tempfile.mkdtemp(prefix=f"scan_{scan_id}_")
         logger.info(f"Cloning repository {repository_url} to {cloned_dir}")
         
-        if not clone_repository(repository_url, cloned_dir, branch):
+        if not clone_repository(repository_url, cloned_dir, branch, user_github_token):
             raise Exception(f"Failed to clone repository: {repository_url}")
         
         # Run the scan

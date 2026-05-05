@@ -15,6 +15,8 @@ __pycache__/
 *.env
 backend/.env
 frontend/.env.local
+frontend/.user_integrations.json
+frontend/.user_integration_tokens.json
 
 # Build outputs
 .next/
@@ -22,6 +24,15 @@ out/
 build/
 dist/
 *.egg-info/
+
+# Scanner outputs — may contain unmasked secrets, NEVER commit
+report.html
+scan_report.html
+scan_results.json
+scanner/scan_report.html
+scanner/scan_results.json
+**/scan_report.html
+**/scan_results.json
 
 # Logs
 logs/
@@ -78,3 +89,5 @@ roots.sst
 *.sqlite3
 backend/secret_sentry.db
 backend/logs/
+backend/.github_tokens.json
+backend/.user_integrations.json

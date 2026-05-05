@@ -12,22 +12,27 @@ import sys
 
 from app.core.config import settings
 from app.core.database import init_db
+from app.core.log_scrub import scrub_record
 from app.api.v1.router import api_router
 from app.middleware.rate_limiter import RateLimitMiddleware
 
 
-# Configure logging
+# Configure logging — every sink runs through scrub_record() so a stray
+# token, webhook URL, or Authorization header in a log line is replaced
+# with ***REDACTED*** before it ever lands on disk or in stdout.
 logger.remove()
 logger.add(
     sys.stdout,
     colorize=True,
-    format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>"
+    format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
+    filter=scrub_record,
 )
 logger.add(
     "logs/secret_sentry.log",
     rotation="500 MB",
     retention="10 days",
-    level="INFO"
+    level="INFO",
+    filter=scrub_record,
 )
 
 
@@ -143,7 +148,7 @@ if __name__ == "__main__":
     import uvicorn
     uvicorn.run(
         "app.main:app",
-        host="0.0.0.0",
-        port=8000,
+        host=settings.HOST,
+        port=settings.PORT,
         reload=settings.DEBUG
     )

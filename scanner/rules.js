@@ -226,6 +226,15 @@ const DATABASE_RULES = [
     description: 'PostgreSQL connection string with embedded credentials',
   },
   {
+    id: 'jdbc-postgres-connection',
+    type: 'JDBC PostgreSQL Connection String',
+    category: 'database',
+    severity: 'high',
+    confidence: 0.85,
+    pattern: /jdbc:postgresql:\/\/[^\s"'<>]*[?;&]password=[^&\s"'<>]+/gi,
+    description: 'JDBC PostgreSQL connection string with embedded password',
+  },
+  {
     id: 'mysql-connection',
     type: 'MySQL Connection String',
     category: 'database',
@@ -233,6 +242,15 @@ const DATABASE_RULES = [
     confidence: 0.95,
     pattern: /mysql:\/\/[^\s"'<>]+:[^\s"'<>]+@[^\s"'<>]+/gi,
     description: 'MySQL connection string with embedded credentials',
+  },
+  {
+    id: 'jdbc-mysql-connection',
+    type: 'JDBC MySQL Connection String',
+    category: 'database',
+    severity: 'high',
+    confidence: 0.85,
+    pattern: /jdbc:mysql:\/\/[^\s"'<>]*[?;&]password=[^&\s"'<>]+/gi,
+    description: 'JDBC MySQL connection string with embedded password',
   },
   {
     id: 'mongodb-connection',
@@ -263,7 +281,7 @@ const PASSWORD_RULES = [
     category: 'password',
     severity: 'high',
     confidence: 0.70,
-    pattern: /(?:password|passwd|pwd|pass)\s*[=:]\s*["']([^"']{8,})["']/gi,
+    pattern: /(?:password|passwd|pwd|pass)\s*[=:]\s*["']?([^"'\s#;]{8,})["']?/gi,
     description: 'Hardcoded password value in source code',
     falsePositives: [
       /password\s*[=:]\s*["']?\s*$/i,           // empty
@@ -280,8 +298,26 @@ const PASSWORD_RULES = [
     category: 'password',
     severity: 'high',
     confidence: 0.75,
-    pattern: /(?:secret[_-]?key|api[_-]?secret)\s*[=:]\s*["']([^"']{16,})["']/gi,
+    pattern: /(?:secret[_-]?key|api[_-]?secret)\s*[=:]\s*["']?([^"'\s#;]{16,})["']?/gi,
     description: 'Hardcoded secret key value in source code',
+  },
+  {
+    id: 'java-keystore-password',
+    type: 'Java Keystore Password',
+    category: 'password',
+    severity: 'high',
+    confidence: 0.80,
+    pattern: /(?:key-store-password|keystore\.password|trust-store-password|truststore\.password)\s*[=:]\s*["']?([^"'\s#;]{8,})["']?/gi,
+    description: 'Java/Spring keystore or truststore password',
+  },
+  {
+    id: 'spring-datasource-password',
+    type: 'Spring Datasource Password',
+    category: 'password',
+    severity: 'high',
+    confidence: 0.85,
+    pattern: /spring\.datasource\.password\s*[=:]\s*["']?([^"'\s#;]{8,})["']?/gi,
+    description: 'Spring Boot datasource password in properties or YAML',
   },
 ];
 
@@ -348,7 +384,7 @@ const API_KEY_RULES = [
     category: 'api_key',
     severity: 'medium',
     confidence: 0.60,
-    pattern: /(?:api[_-]?key|apikey)\s*[=:]\s*["']([A-Za-z0-9_\-]{20,})["']/gi,
+    pattern: /(?:api[_-]?key|apikey)\s*[=:]\s*["']?([A-Za-z0-9_\-]{20,})["']?/gi,
     description: 'Generic API key assignment in source code',
   },
 ];
