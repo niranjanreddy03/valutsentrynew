@@ -76,6 +76,27 @@ export default function RiskTrendChart({ data, loading }: RiskTrendChartProps) {
     )
   }
 
+  if (data.length === 0) {
+    return (
+      <div className="card h-full flex flex-col">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h3 className="text-base font-semibold text-[var(--text-primary)] flex items-center gap-2">
+              <AlertTriangle className="w-5 h-5 text-red-400" />
+              Critical Findings Trend
+            </h3>
+            <p className="text-sm text-[var(--text-muted)] mt-1">Last 30 days</p>
+          </div>
+        </div>
+        <div className="flex-1 flex flex-col items-center justify-center py-8">
+          <TrendingDown className="w-10 h-10 text-[var(--text-muted)] mb-3 opacity-40" />
+          <p className="text-sm font-medium text-[var(--text-secondary)]">No trend data yet</p>
+          <p className="text-xs text-[var(--text-muted)] mt-1">Run your first scan to start tracking findings</p>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="card h-full flex flex-col">
       <div className="flex items-center justify-between mb-4">
@@ -87,8 +108,8 @@ export default function RiskTrendChart({ data, loading }: RiskTrendChartProps) {
           <p className="text-sm text-[var(--text-muted)] mt-1">Last 30 days</p>
         </div>
         <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium ${
-          isImproving 
-            ? 'bg-emerald-500/15 text-emerald-400' 
+          isImproving
+            ? 'bg-emerald-500/15 text-emerald-400'
             : 'bg-red-500/15 text-red-400'
         }`}>
           {isImproving ? (

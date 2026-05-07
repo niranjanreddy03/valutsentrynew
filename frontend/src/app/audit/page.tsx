@@ -1,10 +1,8 @@
 'use client'
 
-import FeatureGate from '@/components/FeatureGate'
 import Header from '@/components/layout/Header'
 import Sidebar from '@/components/layout/Sidebar'
 import { Badge, Button, Card, Skeleton } from '@/components/ui'
-import { isDemoMode } from '@/lib/demoData'
 import { auditLogService, type AuditLogEntry } from '@/services/supabase'
 import {
     ChevronLeft,
@@ -38,137 +36,6 @@ interface AuditLog {
   created_at: string
 }
 
-const DEMO_AUDIT_LOGS: AuditLog[] = [
-  {
-    id: 1,
-    action: 'login',
-    category: 'auth',
-    description: 'User logged in successfully',
-    user_email: 'demo@VaultSentry.io',
-    user_name: 'Demo User',
-    ip_address: '192.168.1.100',
-    user_agent: 'Chrome/120.0 Windows',
-    created_at: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
-  },
-  {
-    id: 2,
-    action: 'scan_started',
-    category: 'scan',
-    description: 'Initiated scan for repository backend-api',
-    user_email: 'demo@VaultSentry.io',
-    user_name: 'Demo User',
-    ip_address: '192.168.1.100',
-    user_agent: 'Chrome/120.0 Windows',
-    resource_type: 'repository',
-    resource_id: '2',
-    created_at: new Date(Date.now() - 15 * 60 * 1000).toISOString(),
-  },
-  {
-    id: 3,
-    action: 'secret_resolved',
-    category: 'secret',
-    description: 'Marked AWS Access Key as resolved',
-    user_email: 'admin@acme.com',
-    user_name: 'Admin User',
-    ip_address: '10.0.0.50',
-    user_agent: 'Firefox/121.0 macOS',
-    resource_type: 'secret',
-    resource_id: '1',
-    created_at: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
-  },
-  {
-    id: 4,
-    action: 'repository_added',
-    category: 'repository',
-    description: 'Added repository mobile-app',
-    user_email: 'demo@VaultSentry.io',
-    user_name: 'Demo User',
-    ip_address: '192.168.1.100',
-    user_agent: 'Chrome/120.0 Windows',
-    resource_type: 'repository',
-    resource_id: '3',
-    created_at: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
-  },
-  {
-    id: 5,
-    action: 'policy_updated',
-    category: 'policy',
-    description: 'Updated scanning policy for production',
-    user_email: 'admin@acme.com',
-    user_name: 'Admin User',
-    ip_address: '10.0.0.50',
-    user_agent: 'Safari/17.0 macOS',
-    resource_type: 'policy',
-    resource_id: 'prod-policy',
-    created_at: new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString(),
-  },
-  {
-    id: 6,
-    action: 'report_generated',
-    category: 'settings',
-    description: 'Generated weekly security report',
-    user_email: 'demo@VaultSentry.io',
-    user_name: 'Demo User',
-    ip_address: '192.168.1.100',
-    user_agent: 'Chrome/120.0 Windows',
-    resource_type: 'report',
-    resource_id: '5',
-    created_at: new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString(),
-  },
-  {
-    id: 7,
-    action: 'api_key_created',
-    category: 'api',
-    description: 'Created new API key for CI/CD integration',
-    user_email: 'admin@acme.com',
-    user_name: 'Admin User',
-    ip_address: '10.0.0.50',
-    user_agent: 'Firefox/121.0 macOS',
-    resource_type: 'api_key',
-    resource_id: 'key_xxx',
-    created_at: new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString(),
-  },
-  {
-    id: 8,
-    action: 'user_invited',
-    category: 'user',
-    description: 'Invited new team member dev@acme.com',
-    user_email: 'admin@acme.com',
-    user_name: 'Admin User',
-    ip_address: '10.0.0.50',
-    user_agent: 'Chrome/120.0 macOS',
-    resource_type: 'user',
-    resource_id: 'dev@acme.com',
-    created_at: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
-  },
-  {
-    id: 9,
-    action: 'secret_rotated',
-    category: 'secret',
-    description: 'Auto-rotated Stripe API key',
-    user_email: 'system@VaultSentry.io',
-    user_name: 'System',
-    ip_address: 'internal',
-    user_agent: 'VaultSentry/1.0',
-    resource_type: 'secret',
-    resource_id: '3',
-    created_at: new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString(),
-  },
-  {
-    id: 10,
-    action: 'scan_completed',
-    category: 'scan',
-    description: 'Scan completed for infrastructure - 2 secrets found',
-    user_email: 'system@VaultSentry.io',
-    user_name: 'System',
-    ip_address: 'internal',
-    user_agent: 'VaultSentry/1.0',
-    resource_type: 'scan',
-    resource_id: '10',
-    created_at: new Date(Date.now() - 72 * 60 * 60 * 1000).toISOString(),
-  },
-]
-
 const categoryConfig: Record<string, { icon: React.ElementType; color: string; bg: string }> = {
   auth: { icon: LogIn, color: 'text-blue-400', bg: 'bg-blue-500/20' },
   scan: { icon: Scan, color: 'text-green-400', bg: 'bg-green-500/20' },
@@ -194,14 +61,6 @@ export default function AuditLogsPage() {
   }, [])
 
   const loadAuditLogs = async () => {
-    // Only show demo data in demo mode
-    if (isDemoMode()) {
-      setLogs(DEMO_AUDIT_LOGS)
-      setLoading(false)
-      return
-    }
-
-    // Fetch real data from Supabase
     try {
       const dbLogs = await auditLogService.getAll()
       // Map DB entries to our AuditLog interface
@@ -222,7 +81,6 @@ export default function AuditLogsPage() {
       setLogs(mappedLogs)
     } catch (err) {
       console.error('[AUDIT] Failed to load audit logs:', err)
-      // Show empty state for real accounts
       setLogs([])
     } finally {
       setLoading(false)
@@ -284,18 +142,6 @@ export default function AuditLogsPage() {
         
         <main className="flex-1 overflow-y-auto overflow-x-hidden" style={{ background: 'var(--bg-primary)' }}>
           <div className="max-w-[1400px] mx-auto px-6 py-6 space-y-6">
-            <FeatureGate
-              feature="audit_logs"
-              title="Audit logs are a Premium feature"
-              description="See every scan, invitation, policy change, and login across your workspace — with tamper-evident history."
-              perks={[
-                'Full compliance-grade activity history',
-                'Filter by user, action, or resource',
-                'Exportable audit trail (CSV / JSON)',
-                'Retained for 30+ days',
-              ]}
-              requiredTier="premium"
-            >
             {/* Header */}
             <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
               <div>
@@ -446,7 +292,6 @@ export default function AuditLogsPage() {
                 </>
               )}
             </Card>
-            </FeatureGate>
           </div>
         </main>
       </div>

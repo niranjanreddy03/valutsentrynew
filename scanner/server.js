@@ -14,6 +14,7 @@ const fs = require('fs');
 const { scanRepository } = require('./repoScanner');
 const { scanDirectory } = require('./directoryScanner');
 const logger = require('./logger');
+const closedLoop = require('./closedLoop');
 
 const app = express();
 const PORT = process.env.SCANNER_PORT || 8000;
@@ -23,7 +24,11 @@ app.use(cors({
   origin: true, // Allow all origins for dev
   credentials: true,
 }));
-app.use(express.json());
+app.use(express.json({
+  verify: (req, res, buf) => {
+    req.rawBody = buf;
+  },
+}));
 
 // ─── Persistent Data Store (file-backed) ────────────────────────────────────
 // Saves to scanner/data/store.json so data survives server restarts
@@ -43,6 +48,13 @@ function loadStore() {
         secrets: saved.secrets || [],
         teams: saved.teams || [],
         team_members: saved.team_members || [],
+        incidents: saved.incidents || [],
+        incident_fingerprints: saved.incident_fingerprints || {},
+        remediations: saved.remediations || {},
+        audit_events: saved.audit_events || [],
+        org_configs: saved.org_configs || {},
+        event_queue: saved.event_queue || [],
+        dead_letters: saved.dead_letters || [],
         _nextRepoId: saved._nextRepoId || 1,
         _nextScanId: saved._nextScanId || 1,
         _nextSecretId: saved._nextSecretId || 1,
@@ -59,6 +71,13 @@ function loadStore() {
     secrets: [],
     teams: [],
     team_members: [],
+    incidents: [],
+    incident_fingerprints: {},
+    remediations: {},
+    audit_events: [],
+    org_configs: {},
+    event_queue: [],
+    dead_letters: [],
     _nextRepoId: 1,
     _nextScanId: 1,
     _nextSecretId: 1,
@@ -519,6 +538,69 @@ app.patch('/api/v1/secrets/bulk', (req, res) => {
   }
   saveStore();
   res.json({ updated });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  CLOSED-LOOP SECRET LIFECYCLE API
+// ═══════════════════════════════════════════════════════════════════════════
+
+app.post('/api/v1/closed-loop/events/github', async (req, res) => {
+  if (!closedLoop.verifyWebhookSignature(req, req.rawBody)) {
+    return res.status(401).json({ error: 'Invalid webhook signature' });
+  }
+
+  try {
+    const result = await closedLoop.ingestCommitEvent(store, req.body || {});
+    saveStore();
+    res.status(202).json(result);
+  } catch (err) {
+    saveStore();
+    logger.error(`[CLOSED-LOOP] GitHub event failed: ${err.message}`);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/v1/closed-loop/orgs/:orgId/incidents', (req, res) => {
+  const incidents = closedLoop.listIncidents(store, req.params.orgId, {
+    status: req.query.status,
+    provider: req.query.provider,
+  });
+  res.json({ items: incidents, total: incidents.length });
+});
+
+app.get('/api/v1/closed-loop/orgs/:orgId/incidents/:incidentId', (req, res) => {
+  const incident = closedLoop.getIncident(store, req.params.orgId, req.params.incidentId);
+  if (!incident) return res.status(404).json({ error: 'Incident not found' });
+  res.json(incident);
+});
+
+app.post('/api/v1/closed-loop/orgs/:orgId/incidents/:incidentId/remediate', async (req, res) => {
+  const incident = await closedLoop.manualRemediate(store, req.params.orgId, req.params.incidentId);
+  if (!incident) return res.status(404).json({ error: 'Incident not found' });
+  saveStore();
+  res.json(incident);
+});
+
+app.get('/api/v1/closed-loop/orgs/:orgId/secrets/:fingerprint/exposures', (req, res) => {
+  res.json({ items: closedLoop.exposureHistory(store, req.params.orgId, req.params.fingerprint) });
+});
+
+app.get('/api/v1/closed-loop/orgs/:orgId/config', (req, res) => {
+  res.json(closedLoop.getConfig(store, req.params.orgId));
+});
+
+app.put('/api/v1/closed-loop/orgs/:orgId/config', (req, res) => {
+  const config = closedLoop.updateConfig(store, req.params.orgId, req.body || {});
+  saveStore();
+  res.json(config);
+});
+
+app.get('/api/v1/closed-loop/orgs/:orgId/audit', (req, res) => {
+  res.json({ items: closedLoop.auditEvents(store, req.params.orgId, req.query.resource_id) });
+});
+
+app.get('/api/v1/closed-loop/pipeline', (req, res) => {
+  res.json(closedLoop.pipelineDescription(req.headers['x-vaultsentry-tenant'] || closedLoop.DEFAULT_TENANT));
 });
 
 // ═══════════════════════════════════════════════════════════════════════════

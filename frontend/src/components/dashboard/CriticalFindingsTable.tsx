@@ -295,7 +295,12 @@ export default function CriticalFindingsTable({
                 <td colSpan={10} className="px-5 py-12 text-center">
                   <div className="empty-state">
                     <AlertOctagon className="w-12 h-12 text-[var(--text-muted)] opacity-50 mb-3" />
-                    <p className="text-[var(--text-muted)]">No findings match your filters</p>
+                    <p className="text-sm font-medium text-[var(--text-secondary)]">
+                      {findings.length === 0 ? 'No critical findings' : 'No findings match your filters'}
+                    </p>
+                    <p className="text-xs text-[var(--text-muted)] mt-1">
+                      {findings.length === 0 ? 'Run a scan to detect secrets in your repositories' : 'Try adjusting your search or filter criteria'}
+                    </p>
                   </div>
                 </td>
               </tr>

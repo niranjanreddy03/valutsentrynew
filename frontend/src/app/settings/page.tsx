@@ -18,7 +18,6 @@ import {
   Bell,
   Shield,
   ShieldCheck,
-  Key,
   Palette,
   Globe,
   Database,
@@ -29,12 +28,9 @@ import {
   RefreshCw,
   Eye,
   EyeOff,
-  Copy,
   Trash2,
-  Plus,
   Check,
   X,
-  Camera,
   CalendarDays,
   Clock,
   Smartphone,
@@ -47,7 +43,7 @@ import {
 
 // NOTE: Integrations moved to the dedicated /integrations page so connection
 // state lives in one place. The tab here is intentionally removed.
-type TabId = 'profile' | 'notifications' | 'security' | 'api' | 'advanced'
+type TabId = 'profile' | 'notifications' | 'security' | 'advanced'
 
 interface Tab {
   id: TabId
@@ -59,7 +55,6 @@ const tabs: Tab[] = [
   { id: 'profile', label: 'Profile', icon: <User className="w-4 h-4" /> },
   { id: 'notifications', label: 'Notifications', icon: <Bell className="w-4 h-4" /> },
   { id: 'security', label: 'Security', icon: <Shield className="w-4 h-4" /> },
-  { id: 'api', label: 'API Keys', icon: <Key className="w-4 h-4" /> },
   { id: 'advanced', label: 'Advanced', icon: <Settings className="w-4 h-4" /> },
 ]
 
@@ -91,6 +86,7 @@ export default function SettingsPage() {
       fullName,
       email,
       role,
+      company: user?.company || '',
     }))
   }, [user, supabaseUser])
 
@@ -484,39 +480,22 @@ export default function SettingsPage() {
     }
   }
 
-  // API keys
-  const [apiKeys, setApiKeys] = useState<{ id: number; name: string; key: string; created: string; lastUsed: string }[]>([])
-  const [showApiKey, setShowApiKey] = useState<number | null>(null)
 
   const handleSave = async () => {
     setSaving(true)
-    // Simulate API call
-    await new Promise((resolve) => setTimeout(resolve, 1000))
-    setSaving(false)
-    toast.success('Settings saved', 'Your changes have been saved successfully')
-  }
-
-  const handleGenerateApiKey = () => {
-    const newKey = {
-      id: Date.now(),
-      name: 'New API Key',
-      key: 'demo_key_' + Math.random().toString(36).substring(2, 38),
-      created: new Date().toISOString().split('T')[0],
-      lastUsed: 'Never',
+    try {
+      await updateProfile({
+        full_name: profile.fullName,
+        company: profile.company || null,
+      } as any)
+      toast.success('Settings saved', 'Your changes have been saved successfully')
+    } catch (err: any) {
+      toast.error('Save failed', err?.message || 'Could not save your settings')
+    } finally {
+      setSaving(false)
     }
-    setApiKeys([...apiKeys, newKey])
-    toast.success('API Key generated', 'New API key has been created')
   }
 
-  const handleDeleteApiKey = (id: number) => {
-    setApiKeys(apiKeys.filter((k) => k.id !== id))
-    toast.info('API Key deleted', 'The API key has been revoked')
-  }
-
-  const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text)
-    toast.info('Copied', 'Copied to clipboard')
-  }
 
   return (
     <div className="flex h-screen overflow-hidden">
@@ -564,31 +543,21 @@ export default function SettingsPage() {
                     <div className="space-y-8">
                       {/* Identity header: avatar + name/email + role */}
                       <div className="flex flex-col sm:flex-row sm:items-center gap-5 pb-6 border-b border-[var(--border-color)]">
-                        <div className="relative">
-                          <div
-                            className="w-20 h-20 rounded-2xl flex items-center justify-center text-[26px] font-semibold shadow-[0_8px_28px_-8px_rgba(59,130,246,0.55)]"
-                            style={{
-                              background: 'linear-gradient(135deg, #3b82f6 0%, #60a5fa 100%)',
-                              color: '#fff',
-                            }}
-                          >
-                            {(profile.fullName || profile.email || '?')
-                              .trim()
-                              .split(/\s+/)
-                              .map((n) => n[0])
-                              .filter(Boolean)
-                              .slice(0, 2)
-                              .join('')
-                              .toUpperCase() || '?'}
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => toast.info('Coming soon', 'Avatar upload will be available shortly')}
-                            className="absolute -bottom-1.5 -right-1.5 h-8 w-8 rounded-full flex items-center justify-center border border-[var(--border-color)] bg-[var(--bg-tertiary)] text-[var(--text-primary)] hover:bg-[var(--bg-secondary)] transition-colors shadow"
-                            aria-label="Change avatar"
-                          >
-                            <Camera className="w-4 h-4" />
-                          </button>
+                        <div
+                          className="w-20 h-20 rounded-2xl flex items-center justify-center text-[26px] font-semibold shadow-[0_8px_28px_-8px_rgba(59,130,246,0.55)]"
+                          style={{
+                            background: 'linear-gradient(135deg, #3b82f6 0%, #60a5fa 100%)',
+                            color: '#fff',
+                          }}
+                        >
+                          {(profile.fullName || profile.email || '?')
+                            .trim()
+                            .split(/\s+/)
+                            .map((n) => n[0])
+                            .filter(Boolean)
+                            .slice(0, 2)
+                            .join('')
+                            .toUpperCase() || '?'}
                         </div>
 
                         <div className="flex-1 min-w-0">
@@ -1165,63 +1134,6 @@ export default function SettingsPage() {
                             {integrations.awsConnected ? 'Disconnect' : 'Configure'}
                           </Button>
                         </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* API Keys */}
-                  {activeTab === 'api' && (
-                    <div className="space-y-6">
-                      <div className="flex items-center justify-between">
-                        <h2 className="text-lg font-semibold text-[var(--text-primary)]">API Keys</h2>
-                        <Button onClick={handleGenerateApiKey}>
-                          <Plus className="w-4 h-4 mr-2" />
-                          Generate New Key
-                        </Button>
-                      </div>
-
-                      <p className="text-[var(--text-muted)] text-sm">
-                        Use API keys to authenticate with the Vault Sentry API. Keep your keys secure and never share them publicly.
-                      </p>
-
-                      <div className="space-y-4">
-                        {apiKeys.map((apiKey) => (
-                          <div key={apiKey.id} className="p-4 bg-[var(--bg-secondary)] rounded-lg">
-                            <div className="flex items-center justify-between mb-3">
-                              <div>
-                                <p className="text-[var(--text-primary)] font-medium">{apiKey.name}</p>
-                                <p className="text-[var(--text-muted)] text-xs">Created {apiKey.created} • Last used {apiKey.lastUsed}</p>
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <button
-                                  onClick={() => setShowApiKey(showApiKey === apiKey.id ? null : apiKey.id)}
-                                  className="p-2 rounded-lg hover:bg-[var(--bg-tertiary)] transition-colors"
-                                >
-                                  {showApiKey === apiKey.id ? (
-                                    <EyeOff className="w-4 h-4 text-[var(--text-muted)]" />
-                                  ) : (
-                                    <Eye className="w-4 h-4 text-[var(--text-muted)]" />
-                                  )}
-                                </button>
-                                <button
-                                  onClick={() => copyToClipboard(apiKey.key)}
-                                  className="p-2 rounded-lg hover:bg-[var(--bg-tertiary)] transition-colors"
-                                >
-                                  <Copy className="w-4 h-4 text-[var(--text-muted)]" />
-                                </button>
-                                <button
-                                  onClick={() => handleDeleteApiKey(apiKey.id)}
-                                  className="p-2 rounded-lg hover:bg-[var(--bg-tertiary)] transition-colors"
-                                >
-                                  <Trash2 className="w-4 h-4 text-red-400" />
-                                </button>
-                              </div>
-                            </div>
-                            <code className="text-sm text-[var(--text-secondary)] bg-[var(--bg-tertiary)] px-3 py-2 rounded block font-mono">
-                              {showApiKey === apiKey.id ? apiKey.key : apiKey.key.replace(/./g, '•')}
-                            </code>
-                          </div>
-                        ))}
                       </div>
                     </div>
                   )}

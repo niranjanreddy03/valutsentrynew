@@ -52,6 +52,7 @@ interface SecretLifecycleProps {
 
 export default function SecretLifecycle({ stats, metrics, loading }: SecretLifecycleProps) {
   const total = stats.detected
+  const safeTotal = total > 0 ? total : 1
   
   const stages = [
     {
@@ -228,19 +229,19 @@ export default function SecretLifecycle({ stats, metrics, loading }: SecretLifec
         <div className="absolute inset-0 flex">
           <div 
             className="h-full bg-red-500 transition-all duration-500"
-            style={{ width: `${(stats.detected - stats.revoked) / total * 100}%` }}
+            style={{ width: `${Math.max(0, stats.detected - stats.revoked) / safeTotal * 100}%` }}
           />
           <div 
             className="h-full bg-amber-500 transition-all duration-500"
-            style={{ width: `${(stats.revoked - stats.rotated) / total * 100}%` }}
+            style={{ width: `${Math.max(0, stats.revoked - stats.rotated) / safeTotal * 100}%` }}
           />
           <div 
             className="h-full bg-blue-500 transition-all duration-500"
-            style={{ width: `${(stats.rotated - stats.verified) / total * 100}%` }}
+            style={{ width: `${Math.max(0, stats.rotated - stats.verified) / safeTotal * 100}%` }}
           />
           <div 
             className="h-full bg-emerald-500 transition-all duration-500"
-            style={{ width: `${stats.verified / total * 100}%` }}
+            style={{ width: `${stats.verified / safeTotal * 100}%` }}
           />
         </div>
       </div>

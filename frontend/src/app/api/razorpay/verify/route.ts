@@ -30,12 +30,24 @@ export const dynamic = 'force-dynamic'
  * crafting a POST — the signature is the only server-side proof.
  */
 export async function POST(req: Request) {
-  const supabase = createServerSupabaseClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  // Try Supabase session first, fall back to local auth headers.
+  let userId: string | null = null
+  let isLocalAuth = false
+  try {
+    const supabase = createServerSupabaseClient()
+    const { data: { user: sbUser } } = await supabase.auth.getUser()
+    if (sbUser) userId = sbUser.id
+  } catch { /* Supabase may be unreachable */ }
 
-  if (!user) {
+  if (!userId) {
+    const headerUserId = req.headers.get('x-user-id')
+    if (headerUserId && headerUserId !== 'local-user') {
+      userId = headerUserId
+      isLocalAuth = true
+    }
+  }
+
+  if (!userId) {
     return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
   }
 
@@ -64,29 +76,37 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'Signature mismatch' }, { status: 400 })
   }
 
-  // Signature matched — promote the user. Use service-role client so this
-  // works regardless of the RLS policies on public.users.
+  // Signature matched — promote the user.
   const now = new Date()
   const expiresAt = new Date(now.getTime() + cycleDurationMs(cycle))
 
-  const { error: updateErr } = await supabaseAdmin()
-    .from('users')
-    .update({
-      subscription_tier: tier,
-      subscription_started_at: now.toISOString(),
-      subscription_expires_at: expiresAt.toISOString(),
-      is_trial: false,
-      trial_ends_at: null,
-      updated_at: now.toISOString(),
-    })
-    .eq('id', user.id)
+  // For Supabase-authed users, persist in DB via service-role client.
+  // For local-auth users, the client-side updateProfile handles persistence.
+  if (!isLocalAuth) {
+    try {
+      const { error: updateErr } = await supabaseAdmin()
+        .from('users')
+        .update({
+          subscription_tier: tier,
+          subscription_started_at: now.toISOString(),
+          subscription_expires_at: expiresAt.toISOString(),
+          is_trial: false,
+          trial_ends_at: null,
+          updated_at: now.toISOString(),
+        })
+        .eq('id', userId)
 
-  if (updateErr) {
-    console.error('[razorpay] failed to promote user after payment:', updateErr)
-    return NextResponse.json(
-      { error: 'Payment verified but failed to update subscription' },
-      { status: 500 },
-    )
+      if (updateErr) {
+        console.error('[razorpay] failed to promote user after payment:', updateErr)
+        return NextResponse.json(
+          { error: 'Payment verified but failed to update subscription' },
+          { status: 500 },
+        )
+      }
+    } catch (err) {
+      console.error('[razorpay] supabaseAdmin error:', err)
+      // Don't fail — client will sync via updateProfile
+    }
   }
 
   return NextResponse.json({

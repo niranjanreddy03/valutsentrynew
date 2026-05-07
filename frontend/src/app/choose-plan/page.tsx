@@ -113,10 +113,10 @@ export default function ChoosePlanPage() {
   const [processing, setProcessing] = useState(false)
 
   useEffect(() => {
-    // Only redirect if fully loaded, authenticated, and NOT a new user
-    const isNewUser = typeof window !== 'undefined' && localStorage.getItem('vs_new_user') === 'true'
-    if (!isLoading && isAuthenticated && !isNewUser) {
-      router.push('/')
+    // Allow authenticated users to visit this page to upgrade their plan.
+    // Only redirect unauthenticated users to login.
+    if (!isLoading && !isAuthenticated) {
+      router.push('/login?redirect=/choose-plan')
     }
   }, [isAuthenticated, isLoading, router])
 

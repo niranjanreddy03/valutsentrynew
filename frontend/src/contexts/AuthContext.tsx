@@ -113,6 +113,8 @@ interface LocalStoredUser {
   email: string
   passwordHash: string
   fullName: string
+  avatar_url: string | null
+  company: string | null
   tier: 'basic' | 'premium' | 'premium_plus'
   subscription_started_at: string | null
   subscription_expires_at: string | null
@@ -146,9 +148,9 @@ function localStoredToUser(u: LocalStoredUser): User {
     id: u.id,
     email: u.email,
     full_name: u.fullName,
-    avatar_url: null,
+    avatar_url: u.avatar_url ?? null,
     role: 'admin',
-    company: null,
+    company: u.company ?? null,
     timezone: 'UTC',
     subscription_tier: u.tier,
     subscription_started_at: u.subscription_started_at,
@@ -615,6 +617,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           email: pending.email,
           passwordHash: pending.passwordHash,
           fullName: pending.fullName,
+          avatar_url: null,
+          company: null,
           tier: 'basic',
           subscription_started_at: null,
           subscription_expires_at: null,
@@ -772,6 +776,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (updates.trial_ends_at !== undefined)
         stored.trial_ends_at = updates.trial_ends_at as string | null
       if (updates.full_name !== undefined) stored.fullName = updates.full_name as string
+      if (updates.avatar_url !== undefined) stored.avatar_url = updates.avatar_url as string | null
+      if (updates.company !== undefined) stored.company = updates.company as string | null
       users[idx] = stored
       writeLocalUsers(users)
       setUser(localStoredToUser(stored))

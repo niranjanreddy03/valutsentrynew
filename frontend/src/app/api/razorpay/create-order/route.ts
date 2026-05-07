@@ -21,14 +21,32 @@ export const dynamic = 'force-dynamic'
  * Razorpay Checkout with these values.
  */
 export async function POST(req: Request) {
-  const supabase = createServerSupabaseClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  // Try Supabase session first, fall back to local auth headers.
+  let userId: string | null = null
+  let userEmail = ''
+  try {
+    const supabase = createServerSupabaseClient()
+    const { data: { user: sbUser } } = await supabase.auth.getUser()
+    if (sbUser) {
+      userId = sbUser.id
+      userEmail = sbUser.email ?? ''
+    }
+  } catch { /* Supabase may be unreachable */ }
 
-  if (!user) {
+  if (!userId) {
+    const headerUserId = req.headers.get('x-user-id')
+    const headerEmail = req.headers.get('x-user-email') || ''
+    if (headerUserId && headerUserId !== 'local-user') {
+      userId = headerUserId
+      userEmail = headerEmail
+    }
+  }
+
+  if (!userId) {
     return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
   }
+
+  const user = { id: userId, email: userEmail }
 
   let body: { tier?: unknown; cycle?: unknown }
   try {

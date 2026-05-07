@@ -15,6 +15,7 @@ import {
 } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 import { useToast } from '@/contexts/ToastContext'
+import { getAuthHeaders } from '@/lib/authHeaders'
 
 // Keep this in sync with /choose-plan PLANS.
 type PaidTier = 'premium' | 'premium_plus'
@@ -111,14 +112,16 @@ function CheckoutInner() {
     }
   }, [authLoading, isAuthenticated, router])
 
-  // Fetch a preview order just to know the amount/currency for display.
-  // The real order used for the charge is the one created at pay time.
+  const [quoteError, setQuoteError] = useState(false)
+
+  // Fetch a preview order to know the amount/currency for display.
   useEffect(() => {
     if (!plan || !isAuthenticated) return
     let cancelled = false
+    setQuoteError(false)
     fetch('/api/razorpay/create-order', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
       credentials: 'include',
       body: JSON.stringify({ tier: plan.tier, cycle: cycleParam }),
     })
@@ -128,7 +131,7 @@ function CheckoutInner() {
         setQuote({ amountMajor: data.displayAmount, currency: data.currency })
       })
       .catch(() => {
-        /* fall back to hiding the price until the user clicks pay */
+        if (!cancelled) setQuoteError(true)
       })
     return () => {
       cancelled = true
@@ -152,7 +155,7 @@ function CheckoutInner() {
       // 1) Server creates the order with a trusted amount.
       const orderRes = await fetch('/api/razorpay/create-order', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         credentials: 'include',
         body: JSON.stringify({ tier: plan.tier, cycle: cycleParam }),
       })
@@ -180,7 +183,7 @@ function CheckoutInner() {
           try {
             const verifyRes = await fetch('/api/razorpay/verify', {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
+              headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
               credentials: 'include',
               body: JSON.stringify({
                 ...response,
@@ -333,10 +336,25 @@ function CheckoutInner() {
                   </p>
                 </div>
 
+                {quoteError && (
+                  <div className="mt-6 p-4 rounded-lg bg-red-500/10 border border-red-500/20">
+                    <p className="text-sm text-red-300">
+                      Could not connect to the payment server. Please try again.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => window.location.reload()}
+                      className="mt-2 text-xs text-red-400 hover:text-red-300 underline"
+                    >
+                      Retry
+                    </button>
+                  </div>
+                )}
+
                 <button
                   type="button"
                   onClick={handlePay}
-                  disabled={processing || !scriptReady || !quote}
+                  disabled={processing || !scriptReady || !quote || quoteError}
                   className="mt-6 w-full py-3.5 px-4 rounded-xl font-semibold text-white bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 shadow-lg shadow-blue-500/25 transition-all flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
                 >
                   {processing ? (

@@ -8,6 +8,13 @@
       "cwd": "frontend",
       "port": 3000,
       "autoPort": true
+    },
+    {
+      "name": "scanner",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["server.js"],
+      "cwd": "scanner",
+      "port": 8000
     }
   ]
 }

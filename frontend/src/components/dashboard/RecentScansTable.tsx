@@ -1,16 +1,17 @@
 'use client'
 
-import { 
-  Clock, 
-  CheckCircle2, 
-  XCircle, 
-  Loader2, 
+import {
+  Clock,
+  CheckCircle2,
+  XCircle,
+  Loader2,
   AlertTriangle,
   GitBranch,
   Play,
   StopCircle,
   RefreshCw,
-  ExternalLink
+  ExternalLink,
+  FolderGit2
 } from 'lucide-react'
 import { useState } from 'react'
 
@@ -27,6 +28,12 @@ interface Scan {
 
 interface RecentScansTableProps {
   scans: Scan[]
+  loading?: boolean
+  onRescan?: (scan: Scan) => void
+  onViewDetails?: (scan: Scan) => void
+  onCancelScan?: (scan: Scan) => void
+  onRefresh?: () => void
+  onViewAll?: () => void
 }
 
 const statusConfig = {
@@ -67,15 +74,78 @@ const statusConfig = {
   }
 }
 
-export default function RecentScansTable({ scans }: RecentScansTableProps) {
+export default function RecentScansTable({
+  scans,
+  loading,
+  onRescan,
+  onViewDetails,
+  onCancelScan,
+  onRefresh,
+  onViewAll
+}: RecentScansTableProps) {
   const [selectedScan, setSelectedScan] = useState<number | null>(null)
+  const [rescanningId, setRescanningId] = useState<number | null>(null)
+  const [cancellingId, setCancellingId] = useState<number | null>(null)
 
-  const handleRescan = (id: number) => {
-    console.log('Re-scanning:', id)
+  const handleRescan = async (scan: Scan) => {
+    if (rescanningId) return
+    setRescanningId(scan.id)
+    try {
+      onRescan?.(scan)
+    } finally {
+      // Reset after a short delay so the spinner shows briefly
+      setTimeout(() => setRescanningId(null), 1500)
+    }
   }
 
-  const handleViewDetails = (id: number) => {
-    console.log('View details:', id)
+  const handleCancel = async (scan: Scan) => {
+    if (cancellingId) return
+    setCancellingId(scan.id)
+    try {
+      onCancelScan?.(scan)
+    } finally {
+      setTimeout(() => setCancellingId(null), 1500)
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="card overflow-hidden animate-pulse">
+        <div className="flex items-center justify-between p-4 border-b border-[var(--border-color)]">
+          <div className="h-5 w-32 skeleton" />
+          <div className="h-4 w-20 skeleton" />
+        </div>
+        <div className="p-4 space-y-3">
+          {[1, 2, 3, 4].map(i => (
+            <div key={i} className="h-12 skeleton rounded-lg" />
+          ))}
+        </div>
+      </div>
+    )
+  }
+
+  if (scans.length === 0) {
+    return (
+      <div className="card overflow-hidden flex flex-col">
+        <div className="flex items-center justify-between p-4 border-b border-[var(--border-color)]">
+          <div>
+            <h3 className="text-lg font-semibold text-[var(--text-primary)]">Recent Scans</h3>
+            <p className="text-[var(--text-muted)] text-sm mt-1">Latest scan activity across repositories</p>
+          </div>
+          {onRefresh && (
+            <button className="btn-ghost text-sm" onClick={onRefresh}>
+              <RefreshCw className="w-4 h-4 mr-2" />
+              Refresh
+            </button>
+          )}
+        </div>
+        <div className="flex-1 flex flex-col items-center justify-center py-12">
+          <FolderGit2 className="w-10 h-10 text-[var(--text-muted)] mb-3 opacity-40" />
+          <p className="text-sm font-medium text-[var(--text-secondary)]">No scans yet</p>
+          <p className="text-xs text-[var(--text-muted)] mt-1">Run your first scan to see activity here</p>
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -85,10 +155,12 @@ export default function RecentScansTable({ scans }: RecentScansTableProps) {
           <h3 className="text-lg font-semibold text-[var(--text-primary)]">Recent Scans</h3>
           <p className="text-[var(--text-muted)] text-sm mt-1">Latest scan activity across repositories</p>
         </div>
-        <button className="btn-ghost text-sm">
-          <RefreshCw className="w-4 h-4 mr-2" />
-          Refresh
-        </button>
+        {onRefresh && (
+          <button className="btn-ghost text-sm" onClick={onRefresh}>
+            <RefreshCw className="w-4 h-4 mr-2" />
+            Refresh
+          </button>
+        )}
       </div>
 
       <div className="overflow-x-auto">
@@ -109,7 +181,7 @@ export default function RecentScansTable({ scans }: RecentScansTableProps) {
               const status = statusConfig[scan.status]
               const StatusIcon = status.icon
               return (
-                <tr 
+                <tr
                   key={scan.id}
                   className={`
                     hover:bg-[var(--bg-tertiary)]/50 cursor-pointer transition-colors
@@ -169,28 +241,39 @@ export default function RecentScansTable({ scans }: RecentScansTableProps) {
                   </td>
                   <td>
                     <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-                      <button 
+                      <button
                         className="p-1.5 rounded hover:bg-[var(--bg-tertiary)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
-                        onClick={() => handleViewDetails(scan.id)}
+                        onClick={() => onViewDetails?.(scan)}
                         title="View Details"
                       >
                         <ExternalLink className="w-4 h-4" />
                       </button>
                       {scan.status !== 'running' && (
-                        <button 
-                          className="p-1.5 rounded hover:bg-[var(--bg-tertiary)] text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors"
-                          onClick={() => handleRescan(scan.id)}
+                        <button
+                          className="p-1.5 rounded hover:bg-[var(--bg-tertiary)] text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors disabled:opacity-50"
+                          onClick={() => handleRescan(scan)}
+                          disabled={rescanningId === scan.id}
                           title="Re-scan"
                         >
-                          <Play className="w-4 h-4" />
+                          {rescanningId === scan.id ? (
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                          ) : (
+                            <Play className="w-4 h-4" />
+                          )}
                         </button>
                       )}
                       {scan.status === 'running' && (
-                        <button 
-                          className="p-1.5 rounded hover:bg-[var(--bg-tertiary)] text-[var(--text-muted)] hover:text-red-400 transition-colors"
+                        <button
+                          className="p-1.5 rounded hover:bg-[var(--bg-tertiary)] text-[var(--text-muted)] hover:text-red-400 transition-colors disabled:opacity-50"
+                          onClick={() => handleCancel(scan)}
+                          disabled={cancellingId === scan.id}
                           title="Cancel"
                         >
-                          <StopCircle className="w-4 h-4" />
+                          {cancellingId === scan.id ? (
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                          ) : (
+                            <StopCircle className="w-4 h-4" />
+                          )}
                         </button>
                       )}
                     </div>
@@ -202,12 +285,15 @@ export default function RecentScansTable({ scans }: RecentScansTableProps) {
         </table>
       </div>
 
-      {/* Footer with pagination hint */}
+      {/* Footer */}
       <div className="px-4 py-3 border-t border-[var(--border-color)] flex items-center justify-between">
         <span className="text-[var(--text-muted)] text-sm">
           Showing {scans.length} of {scans.length} scans
         </span>
-        <button className="text-[var(--accent)] text-sm hover:underline">
+        <button
+          className="text-[var(--accent)] text-sm hover:underline"
+          onClick={() => onViewAll?.()}
+        >
           View All Scans →
         </button>
       </div>

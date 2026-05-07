@@ -13,6 +13,7 @@ const path = require('path');
 const { scanFile } = require('../scanner');
 const { scanDirectory } = require('../directoryScanner');
 const { ALL_RULES } = require('../rules');
+const closedLoop = require('../closedLoop');
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -243,6 +244,67 @@ async function testDirectoryScanner() {
   });
 }
 
+async function testClosedLoop() {
+  console.log('\n── Closed-loop lifecycle ─────────────────────────────────────');
+
+  await test('Detects incident without storing raw secret', async () => {
+    const store = {};
+    const tenantId = `org_${Date.now()}`;
+    const rawSecret = `ghp_${'A'.repeat(12)}${cryptoRandom(24)}`;
+
+    const result = await closedLoop.ingestCommitEvent(store, {
+      tenant_id: tenantId,
+      event_id: 'evt_unit_no_plaintext',
+      repository: 'acme/app',
+      branch: 'main',
+      commit_sha: 'abc123',
+      files: [{ path: 'src/config.js', content: `const token = "${rawSecret}";\n` }],
+    });
+
+    assert.strictEqual(result.incidents.length, 1);
+    assert.strictEqual(result.incidents[0].provider, 'github');
+    assert.ok(result.incidents[0].fingerprint.startsWith('hmac_sha256:v1:'));
+    assert.ok(!JSON.stringify(store).includes(rawSecret), 'raw secret must not be persisted');
+  });
+
+  await test('Does not double-count regex and entropy hits for same value', async () => {
+    const store = {};
+    const tenantId = `org_${Date.now()}_single`;
+    const rawSecret = `ghp_${cryptoRandom(36)}`;
+    const result = await closedLoop.ingestCommitEvent(store, {
+      tenant_id: tenantId,
+      event_id: 'evt_unit_single',
+      repository: 'acme/app',
+      files: [{ path: 'src/config.js', content: `const token = "${rawSecret}";\n` }],
+    });
+
+    assert.strictEqual(result.incidents.length, 1);
+  });
+
+  await test('Deduplicates repeated exposure by tenant fingerprint', async () => {
+    const store = {};
+    const tenantId = `org_${Date.now()}_dedupe`;
+    const rawSecret = 'AKIAIOSFODNN7EXAMPLE';
+    const payload = {
+      tenant_id: tenantId,
+      repository: 'acme/app',
+      branch: 'main',
+      commit_sha: 'abc123',
+      files: [{ path: 'src/config.js', content: `const key = "${rawSecret}";\n` }],
+    };
+
+    const first = await closedLoop.ingestCommitEvent(store, { ...payload, event_id: 'evt_one' });
+    const second = await closedLoop.ingestCommitEvent(store, { ...payload, event_id: 'evt_two' });
+
+    assert.strictEqual(first.incidents[0].incident_id, second.incidents[0].incident_id);
+    assert.strictEqual(store.incidents[0].exposure_count, 2);
+  });
+}
+
+function cryptoRandom(length) {
+  return require('crypto').randomBytes(Math.ceil(length / 2)).toString('hex').slice(0, length);
+}
+
 // ─── Runner ───────────────────────────────────────────────────────────────────
 
 async function run() {
@@ -253,6 +315,7 @@ async function run() {
   await testRules();
   await testScanner();
   await testDirectoryScanner();
+  await testClosedLoop();
 
   console.log('\n──────────────────────────────────────────────────────────────');
   console.log(`  Results: ${passed} passed, ${failed} failed`);

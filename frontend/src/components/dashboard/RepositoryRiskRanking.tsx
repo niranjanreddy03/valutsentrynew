@@ -64,6 +64,27 @@ export default function RepositoryRiskRanking({ repositories, loading }: Reposit
     )
   }
 
+  if (repositories.length === 0) {
+    return (
+      <div className="dashboard-card flex flex-col overflow-hidden">
+        <div className="flex items-center justify-between mb-4 flex-shrink-0">
+          <div>
+            <h3 className="text-base font-semibold text-[var(--text-primary)] flex items-center gap-2">
+              <AlertTriangle className="w-5 h-5 text-amber-400" />
+              Repository Risk Ranking
+            </h3>
+            <p className="text-xs text-[var(--text-muted)] mt-1">Top repositories by risk score</p>
+          </div>
+        </div>
+        <div className="flex-1 flex flex-col items-center justify-center py-8">
+          <FolderGit2 className="w-10 h-10 text-[var(--text-muted)] mb-3 opacity-40" />
+          <p className="text-sm font-medium text-[var(--text-secondary)]">No repositories scanned</p>
+          <p className="text-xs text-[var(--text-muted)] mt-1">Add a repository and run a scan to see risk rankings</p>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="dashboard-card flex flex-col overflow-hidden">
       <div className="flex items-center justify-between mb-4 flex-shrink-0">

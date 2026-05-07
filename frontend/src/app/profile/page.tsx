@@ -13,7 +13,6 @@ import {
   Building,
   Calendar,
   Save,
-  Camera,
   Shield,
   Key,
 } from 'lucide-react'
@@ -78,19 +77,11 @@ export default function ProfilePage() {
               <div className="p-6">
                 {/* Avatar Section */}
                 <div className="flex items-center gap-6 mb-8 pb-6 border-b" style={{ borderColor: 'var(--border-color)' }}>
-                  <div className="relative">
-                    <div 
-                      className="w-24 h-24 rounded-full flex items-center justify-center text-3xl font-bold"
-                      style={{ background: 'var(--accent-primary)', color: 'white' }}
-                    >
-                      {profile.fullName ? profile.fullName.charAt(0).toUpperCase() : 'U'}
-                    </div>
-                    <button 
-                      className="absolute bottom-0 right-0 p-2 rounded-full shadow-lg"
-                      style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-color)' }}
-                    >
-                      <Camera className="w-4 h-4" style={{ color: 'var(--text-secondary)' }} />
-                    </button>
+                  <div
+                    className="w-24 h-24 rounded-full flex items-center justify-center text-3xl font-bold"
+                    style={{ background: 'var(--accent-primary)', color: 'white' }}
+                  >
+                    {profile.fullName ? profile.fullName.charAt(0).toUpperCase() : 'U'}
                   </div>
                   <div>
                     <h2 className="text-xl font-semibold" style={{ color: 'var(--text-primary)' }}>

@@ -8,6 +8,7 @@ import {
     Cloud,
     FileText,
     FolderGit2,
+    GitPullRequest,
     HelpCircle,
     History,
     Key,
@@ -44,6 +45,7 @@ const navigation: NavItem[] = [
   { name: 'S3 Buckets', href: '/s3-buckets', icon: Cloud, feature: 'aws_integration' },
   { name: 'Scans', href: '/scans', icon: Radar },
   { name: 'Findings', href: '/secrets', icon: ShieldAlert },
+  { name: 'Closed Loop', href: '/closed-loop', icon: GitPullRequest },
   { name: 'ML Insights', href: '/insights', icon: Brain },
   { name: 'Policies', href: '/policies', icon: Scale },
   { name: 'Alerts', href: '/alerts', icon: Bell },
@@ -174,16 +176,32 @@ export default function Sidebar({ isOpen, onToggle }: SidebarProps) {
 }
 
 function UserSection() {
+  const pathname = usePathname()
+  const isActive = pathname === '/settings'
+
   return (
     <div className="p-3 border-t" style={{ borderColor: 'var(--border-color)' }}>
-      <div className="flex items-center gap-3 p-2">
+      <Link
+        href="/settings"
+        className="flex items-center gap-3 p-2 rounded-lg transition-colors cursor-pointer"
+        style={{
+          background: isActive ? 'var(--bg-tertiary)' : 'transparent',
+          color: isActive ? 'var(--text-primary)' : 'var(--text-secondary)',
+        }}
+        onMouseEnter={(e) => {
+          if (!isActive) e.currentTarget.style.background = 'var(--bg-secondary)'
+        }}
+        onMouseLeave={(e) => {
+          if (!isActive) e.currentTarget.style.background = 'transparent'
+        }}
+      >
         <div className="w-8 h-8 rounded-full flex items-center justify-center" style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border-color)' }}>
           <User className="w-4 h-4" style={{ color: 'var(--text-secondary)' }} />
         </div>
         <div className="flex-1 min-w-0">
           <p className="text-sm font-medium truncate" style={{ color: 'var(--text-primary)' }}>Account</p>
         </div>
-      </div>
+      </Link>
     </div>
   )
 }

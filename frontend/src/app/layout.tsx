@@ -7,7 +7,7 @@ export const metadata: Metadata = {
   title: 'Vault Sentry - Security Dashboard',
   description: 'Cloud-Native Secret Detection & Security Platform',
   icons: {
-    icon: '/favicon.ico',
+    icon: '/icon.svg',
   },
 }
 
