@@ -17,7 +17,7 @@ const logger = require('./logger');
 const closedLoop = require('./closedLoop');
 
 const app = express();
-const PORT = process.env.SCANNER_PORT || 8000;
+const PORT = process.env.PORT || process.env.SCANNER_PORT || 8000;
 
 // Middleware
 app.use(cors({
