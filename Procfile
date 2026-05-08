@@ -1,1 +1,1 @@
-web: node scanner/server.js
+web: cd scanner && node server.js
