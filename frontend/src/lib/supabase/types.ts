@@ -60,7 +60,10 @@ export type Database = {
           company?: string | null
           timezone?: string
           subscription_tier?: 'basic' | 'premium' | 'premium_plus'
+          subscription_started_at?: string | null
+          subscription_expires_at?: string | null
           is_trial?: boolean
+          trial_ends_at?: string | null
           github_token?: string | null
           github_username?: string | null
           gitlab_token?: string | null
@@ -323,6 +326,9 @@ export type Database = {
       risk_level: 'critical' | 'high' | 'medium' | 'low' | 'info'
       secret_status: 'active' | 'resolved' | 'ignored' | 'false_positive'
       alert_type: 'critical_secret' | 'high_secret' | 'scan_failed' | 'new_repository' | 'scan_completed'
+    }
+    CompositeTypes: {
+      [_ in never]: never
     }
   }
 }

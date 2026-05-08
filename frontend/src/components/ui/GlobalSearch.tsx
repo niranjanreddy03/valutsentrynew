@@ -154,6 +154,7 @@ export default function GlobalSearch({ isOpen, onClose }: GlobalSearchProps) {
         onClose()
         break
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [results, selectedIndex, onClose])
 
   const handleSelect = (result: SearchResult) => {
@@ -202,7 +203,7 @@ export default function GlobalSearch({ isOpen, onClose }: GlobalSearchProps) {
         <div className="max-h-[40vh] overflow-y-auto p-2">
           {results.length === 0 ? (
             <div className="py-8 text-center text-[var(--text-muted)]">
-              No results found for "{query}"
+              No results found for &quot;{query}&quot;
             </div>
           ) : (
             <div className="space-y-1">

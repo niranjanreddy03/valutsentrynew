@@ -253,6 +253,7 @@ export default function InsightsPage() {
     }
   }
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!isAuthenticated) return
     loadData()

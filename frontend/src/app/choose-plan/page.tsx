@@ -325,7 +325,7 @@ export default function ChoosePlanPage() {
             }}
             className="text-sm text-gray-500 hover:text-gray-400 underline underline-offset-4 transition-colors"
           >
-            Skip for now — I'll choose later
+            Skip for now — I&apos;ll choose later
           </button>
         </div>
       </div>

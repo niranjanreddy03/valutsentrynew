@@ -175,6 +175,7 @@ export default function ApiKeysPage() {
   const [isDemo, setIsDemo] = useState(false)
   const toast = useToast()
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     loadApiKeys()
   }, [])

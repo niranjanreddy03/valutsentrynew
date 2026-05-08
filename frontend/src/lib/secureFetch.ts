@@ -67,7 +67,6 @@ export async function secureFetch(
 
   // Light auto-retry on 401 — let the Supabase SDK refresh, then try once.
   if (res.status === 401 && typeof window !== 'undefined') {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { supabase } = await import('@/lib/supabase')
     await supabase.auth.refreshSession().catch(() => {})
     return fetch(input, {

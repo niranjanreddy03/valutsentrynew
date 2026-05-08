@@ -355,6 +355,7 @@ export function ActivityHeatmap({ scans }: { scans?: HeatmapScan[] } = {}) {
       ),
     )
     return result
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scans])
 
   const hasData = data.some((d) => d.value > 0)

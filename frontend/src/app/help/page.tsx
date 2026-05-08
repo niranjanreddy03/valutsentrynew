@@ -109,7 +109,7 @@ export default function HelpPage() {
           <p className="text-[var(--text-secondary)]">Follow these steps to secure your codebase:</p>
           <ol className="list-decimal list-inside space-y-3 text-[var(--text-secondary)]">
             <li><strong>Add a Repository:</strong> Go to Repositories → Add Repository → Enter your Git URL</li>
-            <li><strong>Run Your First Scan:</strong> Click "Run Scan" on any repository to detect secrets</li>
+            <li><strong>Run Your First Scan:</strong> Click &quot;Run Scan&quot; on any repository to detect secrets</li>
             <li><strong>Review Findings:</strong> Check the Dashboard for detected secrets and their severity</li>
             <li><strong>Take Action:</strong> Rotate exposed credentials and update your code</li>
             <li><strong>Set Up Notifications:</strong> Configure Slack/email alerts in Settings</li>
@@ -191,7 +191,7 @@ export default function HelpPage() {
         <div className="space-y-4">
           <h4 className="font-semibold text-[var(--text-primary)]">AWS S3 Integration</h4>
           <div className="space-y-3 text-[var(--text-secondary)]">
-            <p><strong>Setup:</strong> Navigate to S3 Buckets from the sidebar, then click "Add Bucket" to connect your AWS account.</p>
+            <p><strong>Setup:</strong> Navigate to S3 Buckets from the sidebar, then click &quot;Add Bucket&quot; to connect your AWS account.</p>
             <p><strong>Required IAM Permissions:</strong></p>
             <ul className="list-disc list-inside ml-4 space-y-1">
               <li><code className="text-xs bg-[var(--bg-tertiary)] px-1.5 py-0.5 rounded">s3:ListBucket</code> — to enumerate objects in the bucket</li>
@@ -243,7 +243,7 @@ export default function HelpPage() {
           <p className="text-[var(--text-secondary)]">Navigate to the Integrations page from the sidebar to connect external services.</p>
           <div className="space-y-3 text-[var(--text-secondary)]">
             <p><strong>GitHub Webhooks:</strong> Connect your GitHub repositories to trigger automatic scans on every push. Go to Integrations → GitHub → Add Webhook, then paste the provided webhook URL into your GitHub repo settings (Settings → Webhooks). Select the <code className="text-xs bg-[var(--bg-tertiary)] px-1.5 py-0.5 rounded">push</code> event to scan new commits automatically.</p>
-            <p><strong>GitLab Integration:</strong> Similar to GitHub — add the webhook URL under your GitLab project's Settings → Webhooks. Enable the Push events trigger.</p>
+            <p><strong>GitLab Integration:</strong> Similar to GitHub — add the webhook URL under your GitLab project&apos;s Settings → Webhooks. Enable the Push events trigger.</p>
             <p><strong>Slack Notifications:</strong> Connect a Slack workspace to receive real-time alerts when secrets are detected. Go to Integrations → Slack → Connect, authorize the app, and select the channel for alerts. You can filter notifications by severity level.</p>
             <p><strong>Email Alerts:</strong> Configure email recipients under Integrations → Email. Set per-severity thresholds so critical findings notify immediately while low-severity findings are batched into daily digests.</p>
             <p><strong>Jira Ticketing:</strong> Automatically create Jira issues for detected secrets. Provide your Jira instance URL, project key, and API token. Each finding creates a ticket with severity, file location, and remediation steps.</p>

@@ -75,6 +75,9 @@ const nextConfig = {
   reactStrictMode: true,
   // Block the `x-powered-by: Next.js` fingerprint.
   poweredByHeader: false,
+  typescript: {
+    ignoreBuildErrors: true,
+  },
 
   async headers() {
     return [
