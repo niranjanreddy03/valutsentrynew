@@ -24,9 +24,7 @@ const CSP_DIRECTIVES = {
   'default-src': ["'self'"],
   // Next.js injects a per-request nonce in production. In dev we need
   // 'unsafe-eval' for Fast Refresh.
-  'script-src': isProd
-    ? ["'self'", "'strict-dynamic'", "'nonce-__CSP_NONCE__'", 'https://challenges.cloudflare.com', 'https://checkout.razorpay.com']
-    : ["'self'", "'unsafe-eval'", "'unsafe-inline'", 'https://challenges.cloudflare.com', 'https://checkout.razorpay.com'],
+  'script-src': ["'self'", "'unsafe-eval'", "'unsafe-inline'", 'https://challenges.cloudflare.com', 'https://checkout.razorpay.com'],
   'style-src': ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'], // Tailwind runtime classes + Google Fonts
   'img-src': ["'self'", 'data:', 'blob:', 'https:'],
   'font-src': ["'self'", 'data:', 'https://fonts.gstatic.com'],
