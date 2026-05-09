@@ -182,7 +182,17 @@ export default function RegisterPage() {
       }}
     >
       <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-      <span>{msg}</span>
+      <span>
+        {msg}
+        {msg.toLowerCase().includes('already exists') && (
+          <>
+            {' '}
+            <a href="/login" className="underline font-medium text-cyan-400 hover:text-cyan-300">
+              Go to Login
+            </a>
+          </>
+        )}
+      </span>
     </div>
   )
 
