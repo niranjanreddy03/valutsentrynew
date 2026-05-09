@@ -19,12 +19,20 @@ export function razorpay(): Razorpay {
   const key_id = process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID
   const key_secret = process.env.RAZORPAY_KEY_SECRET
   if (!key_id || !key_secret) {
+    console.error(
+      '[razorpay] Keys missing. Set NEXT_PUBLIC_RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET in Amplify env vars.',
+    )
     throw new Error(
-      'Razorpay keys missing. Set NEXT_PUBLIC_RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET.',
+      'Payment gateway not configured. Please contact support.',
     )
   }
   _rzp = new Razorpay({ key_id, key_secret })
   return _rzp
+}
+
+/** Returns true if Razorpay keys are configured. */
+export function isRazorpayConfigured(): boolean {
+  return !!(process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET)
 }
 
 export function verifyPaymentSignature(params: {

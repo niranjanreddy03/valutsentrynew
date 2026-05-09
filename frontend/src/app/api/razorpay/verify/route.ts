@@ -82,9 +82,11 @@ export async function POST(req: Request) {
 
   // For Supabase-authed users, persist in DB via service-role client.
   // For local-auth users, the client-side updateProfile handles persistence.
+  let serverUpdated = false
   if (!isLocalAuth) {
     try {
-      const { error: updateErr } = await supabaseAdmin()
+      const admin = supabaseAdmin()
+      const { error: updateErr } = await admin
         .from('users')
         .update({
           subscription_tier: tier,
@@ -98,10 +100,9 @@ export async function POST(req: Request) {
 
       if (updateErr) {
         console.error('[razorpay] failed to promote user after payment:', updateErr)
-        return NextResponse.json(
-          { error: 'Payment verified but failed to update subscription' },
-          { status: 500 },
-        )
+        // Don't fail — client will sync via updateProfile fallback
+      } else {
+        serverUpdated = true
       }
     } catch (err) {
       console.error('[razorpay] supabaseAdmin error:', err)
@@ -114,5 +115,6 @@ export async function POST(req: Request) {
     tier,
     cycle,
     subscriptionExpiresAt: expiresAt.toISOString(),
+    serverUpdated,
   })
 }

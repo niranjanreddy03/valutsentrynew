@@ -57,8 +57,8 @@ const PLANS: Plan[] = [
     id: 'premium',
     name: 'Professional',
     tier: 'premium',
-    price: 29,
-    yearlyPrice: 290,
+    price: 299,
+    yearlyPrice: 2990,
     tagline: 'Best for growing teams',
     popular: true,
     icon: Rocket,
@@ -81,8 +81,8 @@ const PLANS: Plan[] = [
     id: 'premium_plus',
     name: 'Enterprise',
     tier: 'premium_plus',
-    price: 99,
-    yearlyPrice: 990,
+    price: 999,
+    yearlyPrice: 9990,
     tagline: 'For large organizations',
     icon: Crown,
     gradient: 'from-purple-500 to-pink-600',
@@ -254,11 +254,11 @@ export default function ChoosePlanPage() {
                     ) : (
                       <div>
                         <div className="flex items-baseline">
-                          <span className="text-4xl font-extrabold text-white">${price}</span>
+                          <span className="text-4xl font-extrabold text-white">₹{price}</span>
                           <span className="ml-1.5 text-gray-500">/month</span>
                         </div>
                         {billingCycle === 'yearly' && (
-                          <p className="text-xs text-gray-500 mt-1">Billed ${plan.yearlyPrice}/year</p>
+                          <p className="text-xs text-gray-500 mt-1">Billed ₹{plan.yearlyPrice}/year</p>
                         )}
                       </div>
                     )}
