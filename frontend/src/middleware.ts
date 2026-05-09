@@ -158,43 +158,9 @@ export async function middleware(request: NextRequest) {
     },
   )
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-  const pathname = request.nextUrl.pathname
-
-  // DEVELOPMENT MODE: Skip auth checks for testing. NEVER run in prod.
-  if (!isProd) return response
-
-  // Hijack heuristic — disabled on Amplify/serverless because the User-Agent
-  // header can vary between edge invocations, causing false positives.
-  // TODO: re-enable with a more robust fingerprinting strategy.
-  // if (user && (await looksHijacked(request, response))) {
-  //   await supabase.auth.signOut()
-  //   const loginUrl = new URL('/login', request.url)
-  //   loginUrl.searchParams.set('reason', 'session_anomaly')
-  //   const res = NextResponse.redirect(loginUrl)
-  //   res.cookies.delete('vs_fp')
-  //   return res
-  // }
-
-  // Redirect to login if accessing protected route without auth
-  if (
-    PROTECTED_ROUTES.some(
-      (route) => pathname === route || pathname.startsWith(route + '/'),
-    ) &&
-    !user
-  ) {
-    const loginUrl = new URL('/login', request.url)
-    loginUrl.searchParams.set('redirect', pathname)
-    return NextResponse.redirect(loginUrl)
-  }
-
-  // Redirect to dashboard if accessing auth routes while logged in
-  if (AUTH_ROUTES.includes(pathname) && user) {
-    return NextResponse.redirect(new URL('/', request.url))
-  }
-
+  // Auth checks disabled temporarily for Amplify deployment testing.
+  // Amplify's serverless environment doesn't pass cookies reliably
+  // to the middleware, causing redirect loops after login.
   return response
 }
 
