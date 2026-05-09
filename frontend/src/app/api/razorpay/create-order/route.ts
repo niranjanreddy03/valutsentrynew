@@ -1,5 +1,4 @@
 import { NextResponse } from 'next/server'
-import { createServerSupabaseClient } from '@/lib/supabase/server'
 import { razorpay } from '@/lib/razorpay/server'
 import {
   getPlanPrice,
@@ -21,60 +20,41 @@ export const dynamic = 'force-dynamic'
  * Razorpay Checkout with these values.
  */
 export async function POST(req: Request) {
-  // Try Supabase session first, fall back to local auth headers.
-  let userId: string | null = null
-  let userEmail = ''
   try {
-    const supabase = createServerSupabaseClient()
-    const { data: { user: sbUser } } = await supabase.auth.getUser()
-    if (sbUser) {
-      userId = sbUser.id
-      userEmail = sbUser.email ?? ''
+    // Authenticate via headers sent by getAuthHeaders() on the client.
+    // Server-side cookie auth doesn't work on Amplify serverless.
+    const userId = req.headers.get('x-user-id')
+    const userEmail = req.headers.get('x-user-email') || ''
+
+    if (!userId || userId === 'local-user') {
+      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
     }
-  } catch { /* Supabase may be unreachable */ }
 
-  if (!userId) {
-    const headerUserId = req.headers.get('x-user-id')
-    const headerEmail = req.headers.get('x-user-email') || ''
-    if (headerUserId && headerUserId !== 'local-user') {
-      userId = headerUserId
-      userEmail = headerEmail
+    let body: { tier?: unknown; cycle?: unknown }
+    try {
+      body = await req.json()
+    } catch {
+      return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
     }
-  }
 
-  if (!userId) {
-    return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
-  }
+    const tier = body.tier as PaidTier
+    const cycle = body.cycle as BillingCycle
+    if (!isPaidTier(tier) || !isCycle(cycle)) {
+      return NextResponse.json(
+        { error: 'Invalid tier or billing cycle' },
+        { status: 400 },
+      )
+    }
 
-  const user = { id: userId, email: userEmail }
+    const price = getPlanPrice(tier, cycle)
 
-  let body: { tier?: unknown; cycle?: unknown }
-  try {
-    body = await req.json()
-  } catch {
-    return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
-  }
-
-  const tier = body.tier as PaidTier
-  const cycle = body.cycle as BillingCycle
-  if (!isPaidTier(tier) || !isCycle(cycle)) {
-    return NextResponse.json(
-      { error: 'Invalid tier or billing cycle' },
-      { status: 400 },
-    )
-  }
-
-  const price = getPlanPrice(tier, cycle)
-
-  try {
     const order = await razorpay().orders.create({
       amount: price.amountMinor,
       currency: price.currency,
-      // Receipt must be <= 40 chars. Use a short deterministic-ish token.
-      receipt: `vs_${user.id.slice(0, 8)}_${Date.now().toString(36)}`.slice(0, 40),
+      receipt: `vs_${userId.slice(0, 8)}_${Date.now().toString(36)}`.slice(0, 40),
       notes: {
-        user_id: user.id,
-        email: user.email ?? '',
+        user_id: userId,
+        email: userEmail,
         tier,
         cycle,
       },
@@ -89,10 +69,10 @@ export async function POST(req: Request) {
       cycle,
       displayAmount: price.amountMajor,
     })
-  } catch (err) {
+  } catch (err: any) {
     console.error('[razorpay] create-order failed:', err)
     return NextResponse.json(
-      { error: 'Could not create payment order' },
+      { error: err?.message || 'Could not create payment order' },
       { status: 502 },
     )
   }
