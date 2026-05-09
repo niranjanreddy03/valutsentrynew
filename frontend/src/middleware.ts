@@ -166,17 +166,17 @@ export async function middleware(request: NextRequest) {
   // DEVELOPMENT MODE: Skip auth checks for testing. NEVER run in prod.
   if (!isProd) return response
 
-  // Hijack heuristic — fires before route gating so a compromised cookie is
-  // invalidated on the way in, not after the attacker has already loaded
-  // the target page.
-  if (user && (await looksHijacked(request, response))) {
-    await supabase.auth.signOut()
-    const loginUrl = new URL('/login', request.url)
-    loginUrl.searchParams.set('reason', 'session_anomaly')
-    const res = NextResponse.redirect(loginUrl)
-    res.cookies.delete('vs_fp')
-    return res
-  }
+  // Hijack heuristic — disabled on Amplify/serverless because the User-Agent
+  // header can vary between edge invocations, causing false positives.
+  // TODO: re-enable with a more robust fingerprinting strategy.
+  // if (user && (await looksHijacked(request, response))) {
+  //   await supabase.auth.signOut()
+  //   const loginUrl = new URL('/login', request.url)
+  //   loginUrl.searchParams.set('reason', 'session_anomaly')
+  //   const res = NextResponse.redirect(loginUrl)
+  //   res.cookies.delete('vs_fp')
+  //   return res
+  // }
 
   // Redirect to login if accessing protected route without auth
   if (
