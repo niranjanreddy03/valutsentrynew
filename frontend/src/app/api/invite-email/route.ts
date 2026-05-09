@@ -1,8 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import { rateLimitOrBlock } from '@/lib/rate-limit'
 
 // POST /api/invite-email — Send an invite email to a user
 export async function POST(request: NextRequest) {
+  // Rate limit: 10 invites per 5 minutes per IP
+  const blocked = rateLimitOrBlock(request, 'invite', 10, 300_000)
+  if (blocked) return blocked
+
   try {
     const { email, teamName, inviterName, role } = await request.json()
 

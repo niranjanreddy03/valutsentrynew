@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { Mail, Lock, AlertCircle, ArrowLeft } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 import { useToast } from '@/contexts/ToastContext'
+import { clientRateLimit, clientRateLimitReset } from '@/lib/rate-limit'
 import {
   AuthLayout,
   AuthCard,
@@ -56,6 +57,13 @@ export default function LoginPage() {
       triggerShake()
       return
     }
+    // Rate limit: 5 login attempts per 60 seconds
+    const rateLimitMsg = clientRateLimit('login', 5, 60_000)
+    if (rateLimitMsg) {
+      setError(rateLimitMsg)
+      triggerShake()
+      return
+    }
     if (captchaEnabled && !captchaToken) {
       setError('Please complete the captcha.')
       triggerShake()
@@ -64,6 +72,7 @@ export default function LoginPage() {
     setLoading(true)
     try {
       await login(email, password, captchaToken ?? undefined)
+      clientRateLimitReset('login')
       showToast('Welcome back', 'success')
       router.push('/')
     } catch (err: any) {

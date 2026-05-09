@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { Mail, Lock, ArrowLeft, CheckCircle2, KeyRound, AlertCircle } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 import { useToast } from '@/contexts/ToastContext'
+import { clientRateLimit } from '@/lib/rate-limit'
 import {
   AuthLayout,
   AuthCard,
@@ -59,6 +60,13 @@ export default function ForgotPasswordPage() {
     setError(null)
     if (!email) {
       setError('Please enter your email.')
+      triggerShake()
+      return
+    }
+    // Rate limit: 3 reset attempts per 60 seconds
+    const rateLimitMsg = clientRateLimit('forgot-password', 3, 60_000)
+    if (rateLimitMsg) {
+      setError(rateLimitMsg)
       triggerShake()
       return
     }

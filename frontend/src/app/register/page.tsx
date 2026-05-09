@@ -14,6 +14,7 @@ import {
 } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 import { useToast } from '@/contexts/ToastContext'
+import { clientRateLimit } from '@/lib/rate-limit'
 import {
   AuthLayout,
   AuthCard,
@@ -98,6 +99,13 @@ export default function RegisterPage() {
     }
     if (!acceptTerms) {
       setError('You must accept the Terms and Privacy Policy to continue.')
+      triggerShake()
+      return
+    }
+    // Rate limit: 3 signup attempts per 60 seconds
+    const rateLimitMsg = clientRateLimit('register', 3, 60_000)
+    if (rateLimitMsg) {
+      setError(rateLimitMsg)
       triggerShake()
       return
     }

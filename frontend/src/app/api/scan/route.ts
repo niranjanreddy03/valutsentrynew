@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { rateLimitOrBlock } from '@/lib/rate-limit'
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1'
 
@@ -42,5 +43,9 @@ async function proxyToBackend(path: string, request: Request) {
 
 // POST /api/scan → POST /api/v1/scans/trigger
 export async function POST(request: Request) {
+  // Rate limit: 5 scans per 2 minutes per IP
+  const blocked = rateLimitOrBlock(request, 'scan', 5, 120_000)
+  if (blocked) return blocked
+
   return proxyToBackend('/scans/trigger', request)
 }

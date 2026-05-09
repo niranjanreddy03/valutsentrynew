@@ -19,6 +19,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { verifyTurnstile, getClientIp } from '@/lib/turnstile'
+import { rateLimitOrBlock } from '@/lib/rate-limit'
 
 interface SupportPayload {
   subject: string
@@ -35,6 +36,10 @@ const FROM_ADDRESS =
   process.env.SUPPORT_FROM_ADDRESS || 'VaultSentry Support <support@thevaultsentry.com>'
 
 export async function POST(request: NextRequest) {
+  // Rate limit: 5 support tickets per 5 minutes per IP
+  const blocked = rateLimitOrBlock(request, 'support', 5, 300_000)
+  if (blocked) return blocked
+
   let payload: SupportPayload
   try {
     payload = (await request.json()) as SupportPayload

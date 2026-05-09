@@ -115,21 +115,8 @@ export function Turnstile({
   }, [resetKey])
 
   if (!siteKey) {
-    return (
-      <div
-        className={className}
-        style={{
-          border: '1px dashed rgba(239, 68, 68, 0.4)',
-          background: 'rgba(239, 68, 68, 0.05)',
-          color: '#fca5a5',
-          borderRadius: 12,
-          padding: '10px 12px',
-          fontSize: 12,
-        }}
-      >
-        Turnstile site key missing. Set <code>NEXT_PUBLIC_TURNSTILE_SITE_KEY</code>.
-      </div>
-    )
+    // No site key — silently skip the widget instead of showing a warning.
+    return null
   }
 
   return <div ref={containerRef} className={className} />
