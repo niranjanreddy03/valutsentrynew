@@ -87,10 +87,16 @@ const nextConfig = {
   },
 
   async rewrites() {
+    const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1'
+    // Strip trailing /api/v1 to get the base URL for the rewrite destination.
+    const backendBase = backendUrl.replace(/\/api\/v1\/?$/, '')
+
     return [
       {
-        source: '/api/:path*',
-        destination: 'http://localhost:8000/api/:path*',
+        // Only proxy /api/v1/* to the scanner backend.
+        // Other /api/* routes (razorpay, support, csrf, etc.) stay in Next.js.
+        source: '/api/v1/:path*',
+        destination: `${backendBase}/api/v1/:path*`,
       },
     ]
   },
