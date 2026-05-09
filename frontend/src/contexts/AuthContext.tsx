@@ -356,18 +356,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (event === 'SIGNED_OUT') {
           router.push('/login')
         } else if (event === 'SIGNED_IN') {
-          // Defer the MFA check so we don't block the auth response.
-          setTimeout(() => {
-            userHasVerifiedMfa(supabase)
-              .then((needsChallenge) => {
-                if (needsChallenge) router.push('/mfa-challenge')
-                else router.push('/')
-              })
-              .catch((err) => {
-                console.warn('[AUTH] MFA check on SIGNED_IN failed:', err)
-                router.push('/')
-              })
-          }, 0)
+          // MFA disabled temporarily for deployment testing
+          router.push('/')
         } else if (event === 'MFA_CHALLENGE_VERIFIED') {
           // Only redirect to dashboard when this is the post-login MFA gate
           // (`/mfa-challenge`). For step-up MFA on any other page (settings,
@@ -487,12 +477,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // getAuthenticatorAssuranceLevel) because the AAL claim is populated
         // lazily after signInWithPassword and can race the redirect. A
         // verified factor in auth.mfa_factors is the ground truth.
-        const needsChallenge = await userHasVerifiedMfa(supabase)
-        console.log('[AUTH] Post-login MFA check → needsChallenge:', needsChallenge)
-        if (needsChallenge) {
-          router.push('/mfa-challenge')
-          return
-        }
+        // MFA disabled temporarily for deployment testing
+        // const needsChallenge = await userHasVerifiedMfa(supabase)
+        // console.log('[AUTH] Post-login MFA check → needsChallenge:', needsChallenge)
+        // if (needsChallenge) {
+        //   router.push('/mfa-challenge')
+        //   return
+        // }
       } catch (err) {
         if (isCaptchaError(err)) {
           throw captchaSetupError() ?? err
