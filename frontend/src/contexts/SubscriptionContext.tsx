@@ -2,6 +2,7 @@
 
 import { createContext, ReactNode, useContext, useEffect, useState, useCallback } from 'react'
 import { useAuth } from './AuthContext'
+import { getSupabaseClient } from '@/lib/supabase/client'
 
 export type SubscriptionTier = 'basic' | 'premium' | 'premium_plus'
 
@@ -211,6 +212,7 @@ const SubscriptionContext = createContext<SubscriptionContextType | undefined>(u
 
 export function SubscriptionProvider({ children }: { children: ReactNode }) {
   const { user, isAuthenticated } = useAuth()
+  const supabase = getSupabaseClient()
   const [status, setStatus] = useState<SubscriptionStatus | null>(null)
   const [limits, setLimits] = useState<TierLimits | null>(null)
   const [plans, setPlans] = useState<PlanInfo[]>(DEFAULT_PLANS)
@@ -318,20 +320,34 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
     return tierLimits.scans_per_week > 0
   }, [status, currentTier])
 
-  // Upgrade subscription tier
+  // Upgrade subscription tier (for free tier switches / downgrades).
+  // Paid upgrades go through /checkout → Razorpay → /api/razorpay/verify.
   const upgradeTier = useCallback(async (tier: SubscriptionTier): Promise<boolean> => {
     try {
       setError(null)
-      const response = await fetch('/api/v1/subscription/upgrade', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ tier }),
-      })
+      if (!user) {
+        setError('Not authenticated')
+        return false
+      }
 
-      if (!response.ok) {
-        const data = await response.json()
-        setError(data.detail || 'Failed to upgrade subscription')
+      // For the basic (free) tier we can update directly via Supabase.
+      // Paid tiers are handled by the Razorpay checkout flow, not here.
+      const now = new Date().toISOString()
+      const { error: updateErr } = await supabase
+        .from('users')
+        // @ts-expect-error - Supabase type inference
+        .update({
+          subscription_tier: tier,
+          subscription_started_at: now,
+          is_trial: false,
+          trial_ends_at: null,
+          updated_at: now,
+        })
+        .eq('id', user.id)
+
+      if (updateErr) {
+        console.error('[subscription] tier update failed:', updateErr)
+        setError('Failed to update subscription')
         return false
       }
 
@@ -341,20 +357,35 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
       setError('Failed to upgrade subscription')
       return false
     }
-  }, [refreshStatus])
+  }, [refreshStatus, user])
 
-  // Start trial
+  // Start trial — sets user to premium_plus with a 14-day trial period.
   const startTrial = useCallback(async (): Promise<boolean> => {
     try {
       setError(null)
-      const response = await fetch('/api/v1/subscription/start-trial', {
-        method: 'POST',
-        credentials: 'include',
-      })
+      if (!user) {
+        setError('Not authenticated')
+        return false
+      }
 
-      if (!response.ok) {
-        const data = await response.json()
-        setError(data.detail || 'Failed to start trial')
+      const now = new Date()
+      const trialEnd = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000) // 14 days
+
+      const { error: updateErr } = await supabase
+        .from('users')
+        // @ts-expect-error - Supabase type inference
+        .update({
+          subscription_tier: 'premium_plus',
+          subscription_started_at: now.toISOString(),
+          is_trial: true,
+          trial_ends_at: trialEnd.toISOString(),
+          updated_at: now.toISOString(),
+        })
+        .eq('id', user.id)
+
+      if (updateErr) {
+        console.error('[subscription] trial start failed:', updateErr)
+        setError('Failed to start trial')
         return false
       }
 
@@ -364,7 +395,7 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
       setError('Failed to start trial')
       return false
     }
-  }, [refreshStatus])
+  }, [refreshStatus, user])
 
   return (
     <SubscriptionContext.Provider

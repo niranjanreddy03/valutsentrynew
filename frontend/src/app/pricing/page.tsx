@@ -63,20 +63,25 @@ export default function PricingPage() {
       toast.info('You are already on this plan')
       return
     }
-    setIsUpgrading(true)
-    try {
-      const success = await upgradeTier(tier)
-      if (success) {
-        toast.success(
-          `Successfully upgraded to ${tier === 'premium_plus' ? 'Premium Plus' : tier.charAt(0).toUpperCase() + tier.slice(1)}!`,
-        )
-        router.push('/')
-      } else {
-        toast.error(error || 'Failed to upgrade')
+    if (tier === 'basic') {
+      // Free plan — just update profile directly
+      setIsUpgrading(true)
+      try {
+        const success = await upgradeTier(tier)
+        if (success) {
+          toast.success('Switched to Basic plan.')
+          router.push('/')
+        } else {
+          toast.error(error || 'Failed to switch plan')
+        }
+      } finally {
+        setIsUpgrading(false)
       }
-    } finally {
-      setIsUpgrading(false)
+      return
     }
+    // Paid plans — redirect to Razorpay checkout
+    const params = new URLSearchParams({ plan: tier, cycle: billingCycle })
+    router.push(`/checkout?${params.toString()}`)
   }
 
   const handleDowngrade = async (tier: SubscriptionTier, planName: string) => {
@@ -88,17 +93,24 @@ export default function PricingPage() {
       `Switch from your current plan to ${planName}?\n\nYou'll lose access to higher-tier features at the end of your billing period. Continue?`,
     )
     if (!confirmed) return
-    setIsUpgrading(true)
-    try {
-      const success = await upgradeTier(tier)
-      if (success) {
-        toast.success(`Plan changed to ${planName}.`)
-        router.push('/')
-      } else {
-        toast.error(error || 'Failed to change plan')
+    if (tier === 'basic') {
+      // Downgrading to free — just update profile
+      setIsUpgrading(true)
+      try {
+        const success = await upgradeTier(tier)
+        if (success) {
+          toast.success(`Plan changed to ${planName}.`)
+          router.push('/')
+        } else {
+          toast.error(error || 'Failed to change plan')
+        }
+      } finally {
+        setIsUpgrading(false)
       }
-    } finally {
-      setIsUpgrading(false)
+    } else {
+      // Switching to a different paid plan — go through checkout
+      const params = new URLSearchParams({ plan: tier, cycle: billingCycle })
+      router.push(`/checkout?${params.toString()}`)
     }
   }
 
