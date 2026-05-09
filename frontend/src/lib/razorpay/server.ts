@@ -1,33 +1,51 @@
 import crypto from 'crypto'
-import Razorpay from 'razorpay'
 import { createClient as createSupabaseAdminClient } from '@supabase/supabase-js'
 import type { Database } from '@/lib/supabase/types'
 
 /**
- * Server-only Razorpay helpers. Do not import from client components.
+ * Server-only Razorpay helpers — SDK-free.
  *
- * - razorpay(): returns a memoised Razorpay SDK instance.
- * - verifyPaymentSignature(): HMAC-SHA256 check for the Checkout callback.
- * - verifyWebhookSignature(): HMAC-SHA256 check for dashboard webhooks.
- * - supabaseAdmin(): service-role Supabase client used after a verified
- *   payment to update the user's subscription tier bypassing RLS.
+ * Uses Razorpay REST API directly via fetch so there's no third-party
+ * package that can crash on Amplify's serverless Lambda.
  */
 
-let _rzp: Razorpay | null = null
-export function razorpay(): Razorpay {
-  if (_rzp) return _rzp
+const RAZORPAY_API = 'https://api.razorpay.com/v1'
+
+function razorpayAuth(): string {
   const key_id = process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID
   const key_secret = process.env.RAZORPAY_KEY_SECRET
   if (!key_id || !key_secret) {
-    console.error(
-      '[razorpay] Keys missing. Set NEXT_PUBLIC_RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET in Amplify env vars.',
-    )
-    throw new Error(
-      'Payment gateway not configured. Please contact support.',
-    )
+    throw new Error('Payment gateway not configured. Set NEXT_PUBLIC_RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET.')
   }
-  _rzp = new Razorpay({ key_id, key_secret })
-  return _rzp
+  return 'Basic ' + Buffer.from(`${key_id}:${key_secret}`).toString('base64')
+}
+
+/**
+ * Create a Razorpay order via REST API.
+ * Replaces razorpay SDK's orders.create().
+ */
+export async function createRazorpayOrder(params: {
+  amount: number
+  currency: string
+  receipt: string
+  notes: Record<string, string>
+}): Promise<{ id: string; amount: number; currency: string }> {
+  const res = await fetch(`${RAZORPAY_API}/orders`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: razorpayAuth(),
+    },
+    body: JSON.stringify(params),
+  })
+
+  if (!res.ok) {
+    const err = await res.text()
+    console.error('[razorpay] order creation failed:', res.status, err)
+    throw new Error(`Razorpay API error: ${res.status}`)
+  }
+
+  return res.json()
 }
 
 /** Returns true if Razorpay keys are configured. */
@@ -46,7 +64,6 @@ export function verifyPaymentSignature(params: {
     .createHmac('sha256', secret)
     .update(`${params.orderId}|${params.paymentId}`)
     .digest('hex')
-  // timingSafeEqual requires equal-length buffers
   const a = Buffer.from(expected, 'utf8')
   const b = Buffer.from(params.signature, 'utf8')
   if (a.length !== b.length) return false

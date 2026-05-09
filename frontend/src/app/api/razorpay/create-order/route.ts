@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { razorpay } from '@/lib/razorpay/server'
+import { createRazorpayOrder } from '@/lib/razorpay/server'
 import {
   getPlanPrice,
   isCycle,
@@ -48,7 +48,7 @@ export async function POST(req: Request) {
 
     const price = getPlanPrice(tier, cycle)
 
-    const order = await razorpay().orders.create({
+    const order = await createRazorpayOrder({
       amount: price.amountMinor,
       currency: price.currency,
       receipt: `vs_${userId.slice(0, 8)}_${Date.now().toString(36)}`.slice(0, 40),
