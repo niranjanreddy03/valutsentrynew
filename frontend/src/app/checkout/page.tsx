@@ -227,8 +227,8 @@ function CheckoutInner() {
         strategy="afterInteractive"
         onLoad={() => setScriptReady(true)}
       />
-      <div className="min-h-screen bg-[#0a0a0f] py-12 px-4">
-        <div className="max-w-lg mx-auto">
+      <div className="min-h-screen bg-[#0a0a0f] py-12 px-4 sm:px-6 lg:px-8">
+        <div className="max-w-4xl mx-auto">
           {/* Back link */}
           <Link
             href="/choose-plan"
@@ -252,31 +252,34 @@ function CheckoutInner() {
               </div>
             </div>
           ) : (
-            <div className="space-y-5">
-              {/* Order summary card */}
-              <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-5">
-                <p className="text-[11px] font-medium text-white/30 uppercase tracking-wider mb-4">
+            <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
+              {/* Left — Order summary */}
+              <div className="lg:col-span-3 rounded-xl border border-white/[0.06] bg-white/[0.02] p-6">
+                <p className="text-[11px] font-medium text-white/30 uppercase tracking-wider mb-5">
                   Order summary
                 </p>
 
-                <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center justify-between mb-5">
                   <div className="flex items-center gap-3">
-                    <div className={`w-8 h-8 rounded-md flex items-center justify-center ${
+                    <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
                       plan.tier === 'premium' ? 'bg-blue-500/10' : 'bg-purple-500/10'
                     }`}>
                       {plan.tier === 'premium'
-                        ? <Zap className="w-4 h-4 text-blue-400" />
-                        : <Crown className="w-4 h-4 text-purple-400" />
+                        ? <Zap className="w-5 h-5 text-blue-400" />
+                        : <Crown className="w-5 h-5 text-purple-400" />
                       }
                     </div>
                     <div>
-                      <p className="text-[14px] font-medium text-white">{plan.name}</p>
-                      <p className="text-[12px] text-white/40 capitalize">{cycleParam} billing</p>
+                      <p className="text-[16px] font-semibold text-white">{plan.name}</p>
+                      <p className="text-[13px] text-white/40">{plan.tagline}</p>
                     </div>
                   </div>
                   <div className="text-right">
                     {priceLabel ? (
-                      <p className="text-lg font-semibold text-white">{priceLabel}<span className="text-[12px] text-white/30 font-normal">/{cycleParam === 'yearly' ? 'yr' : 'mo'}</span></p>
+                      <div>
+                        <p className="text-2xl font-bold text-white">{priceLabel}</p>
+                        <p className="text-[12px] text-white/30">per {cycleParam === 'yearly' ? 'year' : 'month'}</p>
+                      </div>
                     ) : quoteError ? (
                       <p className="text-[13px] text-red-400">Error</p>
                     ) : (
@@ -285,59 +288,88 @@ function CheckoutInner() {
                   </div>
                 </div>
 
-                <div className="border-t border-white/[0.04] pt-3 space-y-1.5">
-                  {plan.highlights.map((h) => (
-                    <div key={h} className="flex items-center gap-2">
-                      <Check className="w-3 h-3 text-emerald-400/60 flex-shrink-0" />
-                      <span className="text-[12px] text-white/40">{h}</span>
-                    </div>
-                  ))}
+                <div className="border-t border-white/[0.04] pt-4">
+                  <p className="text-[11px] font-medium text-white/25 uppercase tracking-wider mb-3">What&apos;s included</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {plan.highlights.map((h) => (
+                      <div key={h} className="flex items-center gap-2">
+                        <Check className="w-3.5 h-3.5 text-emerald-400/60 flex-shrink-0" />
+                        <span className="text-[13px] text-white/50">{h}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="border-t border-white/[0.04] mt-5 pt-4 flex items-center justify-between">
+                  <span className="text-[13px] text-white/40 capitalize">{cycleParam} billing</span>
+                  <div className="flex items-center gap-1.5 text-[12px] text-white/25">
+                    <Lock className="w-3 h-3" />
+                    Secure checkout
+                  </div>
                 </div>
               </div>
 
-              {/* Payment info */}
-              <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-5">
-                <p className="text-[11px] font-medium text-white/30 uppercase tracking-wider mb-3">
-                  Payment
-                </p>
-                <p className="text-[13px] text-white/50 leading-relaxed">
-                  You&apos;ll be redirected to Razorpay to pay via UPI, card, net banking, or wallet. Your card details never touch our servers.
-                </p>
+              {/* Right — Payment */}
+              <div className="lg:col-span-2 space-y-4">
+                <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-6">
+                  <p className="text-[11px] font-medium text-white/30 uppercase tracking-wider mb-4">
+                    Payment
+                  </p>
 
-                {quoteError && (
-                  <div className="mt-4 p-3 rounded-lg bg-red-500/5 border border-red-500/10">
-                    <p className="text-[13px] text-red-400">
-                      Could not connect to payment server.
-                    </p>
-                    <button
-                      type="button"
-                      onClick={() => window.location.reload()}
-                      className="mt-1.5 text-[12px] text-red-400/70 hover:text-red-300 underline underline-offset-2"
-                    >
-                      Retry
-                    </button>
+                  <p className="text-[13px] text-white/50 leading-relaxed mb-5">
+                    You&apos;ll be redirected to Razorpay&apos;s secure checkout to pay with UPI, card, net banking, or wallet.
+                  </p>
+
+                  <div className="rounded-lg border border-white/[0.04] bg-white/[0.02] p-3 mb-5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[13px] text-white/40">Total</span>
+                      {priceLabel ? (
+                        <span className="text-[15px] font-semibold text-white">{priceLabel}<span className="text-[11px] text-white/30 font-normal ml-0.5">/{cycleParam === 'yearly' ? 'yr' : 'mo'}</span></span>
+                      ) : (
+                        <div className="w-4 h-4 border-2 border-white/20 border-t-white/60 rounded-full animate-spin" />
+                      )}
+                    </div>
                   </div>
-                )}
 
-                <button
-                  type="button"
-                  onClick={handlePay}
-                  disabled={processing || !scriptReady || !quote || quoteError}
-                  className="mt-5 w-full py-3 px-4 rounded-lg text-[13px] font-medium text-white bg-blue-600 hover:bg-blue-500 transition-colors flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
-                >
-                  {processing ? (
-                    <>
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      Processing…
-                    </>
-                  ) : (
-                    <>
-                      Pay {priceLabel ?? '…'} securely
-                    </>
+                  {quoteError && (
+                    <div className="mb-4 p-3 rounded-lg bg-red-500/5 border border-red-500/10">
+                      <p className="text-[13px] text-red-400">
+                        Could not connect to payment server.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => window.location.reload()}
+                        className="mt-1.5 text-[12px] text-red-400/70 hover:text-red-300 underline underline-offset-2"
+                      >
+                        Retry
+                      </button>
+                    </div>
                   )}
-                </button>
 
-                <div className="mt-4 flex items-center justify-center gap-4 text-[11px] text-white/20">
+                  <button
+                    type="button"
+                    onClick={handlePay}
+                    disabled={processing || !scriptReady || !quote || quoteError}
+                    className="w-full py-3 px-4 rounded-lg text-[13px] font-medium text-white bg-blue-600 hover:bg-blue-500 transition-colors flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    {processing ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        Processing…
+                      </>
+                    ) : (
+                      <>
+                        Pay {priceLabel ?? '…'} securely
+                      </>
+                    )}
+                  </button>
+
+                  <p className="mt-3 text-center text-[11px] text-white/20">
+                    Your card details never touch our servers.
+                  </p>
+                </div>
+
+                <div className="flex items-center justify-center gap-4 text-[11px] text-white/20 py-2">
                   <span className="flex items-center gap-1">
                     <Lock className="w-3 h-3" />
                     256-bit TLS
