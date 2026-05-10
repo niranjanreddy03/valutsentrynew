@@ -26,6 +26,8 @@ import {
 } from 'lucide-react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import { useSubscription } from '@/contexts/SubscriptionContext'
+import { Lock } from 'lucide-react'
 
 interface SidebarProps {
   isOpen: boolean
@@ -45,9 +47,9 @@ const navigation: NavItem[] = [
   { name: 'S3 Buckets', href: '/s3-buckets', icon: Cloud, feature: 'aws_integration' },
   { name: 'Scans', href: '/scans', icon: Radar },
   { name: 'Findings', href: '/secrets', icon: ShieldAlert },
-  { name: 'Closed Loop', href: '/closed-loop', icon: GitPullRequest },
-  { name: 'ML Insights', href: '/insights', icon: Brain },
-  { name: 'Policies', href: '/policies', icon: Scale },
+  { name: 'Closed Loop', href: '/closed-loop', icon: GitPullRequest, feature: 'auto_rotation' },
+  { name: 'ML Insights', href: '/insights', icon: Brain, feature: 'ml_risk_scoring' },
+  { name: 'Policies', href: '/policies', icon: Scale, feature: 'custom_patterns' },
   { name: 'Alerts', href: '/alerts', icon: Bell },
   { name: 'Reports', href: '/reports', icon: FileText, feature: 'export_reports' },
   { name: 'Scheduled Scans', href: '/scheduled-scans', icon: CalendarClock, feature: 'scheduled_scans' },
@@ -69,25 +71,31 @@ const bottomNavigation = [
 
 export default function Sidebar({ isOpen, onToggle }: SidebarProps) {
   const pathname = usePathname()
+  const { checkFeature } = useSubscription()
 
   const renderNavItem = (item: NavItem) => {
     const isActive = pathname === item.href
     const Icon = item.icon
+    const locked = item.feature ? !checkFeature(item.feature) : false
 
     return (
       <Link
         key={item.name}
-        href={item.href}
+        href={locked ? '/choose-plan' : item.href}
         className="flex items-center gap-3 px-3 py-2 rounded-md transition-colors hover:opacity-90"
         style={{
-          background: isActive ? 'var(--bg-tertiary)' : 'transparent',
-          color: isActive ? 'var(--text-primary)' : 'var(--text-muted)',
+          background: isActive && !locked ? 'var(--bg-tertiary)' : 'transparent',
+          color: locked ? 'var(--text-muted)' : isActive ? 'var(--text-primary)' : 'var(--text-muted)',
+          opacity: locked ? 0.45 : 1,
         }}
-        title={!isOpen ? item.name : undefined}
+        title={!isOpen ? (locked ? `${item.name} (Upgrade)` : item.name) : undefined}
       >
         <Icon className="w-5 h-5 flex-shrink-0" />
         {isOpen && (
-          <span className="text-sm whitespace-nowrap flex-1">{item.name}</span>
+          <>
+            <span className="text-sm whitespace-nowrap flex-1">{item.name}</span>
+            {locked && <Lock className="w-3.5 h-3.5 flex-shrink-0" style={{ color: 'var(--text-muted)' }} />}
+          </>
         )}
       </Link>
     )
