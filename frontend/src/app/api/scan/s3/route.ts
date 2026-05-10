@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { guardFeature } from '@/lib/subscriptionGuard'
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1'
 
@@ -16,6 +17,12 @@ function forwardHeaders(request: Request): Record<string, string> {
 
 // POST /api/scan/s3 → POST /api/v1/cloud/s3/scan
 export async function POST(request: Request) {
+  // S3 scanning requires premium_plus
+  const guard = await guardFeature('aws_integration')
+  if (!guard.allowed) {
+    return NextResponse.json({ error: guard.error, upgrade: true }, { status: 403 })
+  }
+
   try {
     const body = await request.json()
 

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { rateLimitOrBlock } from '@/lib/rate-limit'
+import { guardRunScan } from '@/lib/subscriptionGuard'
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1'
 
@@ -46,6 +47,15 @@ export async function POST(request: Request) {
   // Rate limit: 5 scans per 2 minutes per IP
   const blocked = rateLimitOrBlock(request, 'scan', 5, 120_000)
   if (blocked) return blocked
+
+  // Server-side subscription guard — cannot be bypassed from the browser
+  const guard = await guardRunScan()
+  if (!guard.allowed) {
+    return NextResponse.json(
+      { error: guard.error, upgrade: true },
+      { status: 403 },
+    )
+  }
 
   return proxyToBackend('/scans/trigger', request)
 }

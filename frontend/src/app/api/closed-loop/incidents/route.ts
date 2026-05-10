@@ -1,8 +1,15 @@
 import { NextResponse } from 'next/server'
+import { guardFeature } from '@/lib/subscriptionGuard'
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1'
 
 export async function GET(request: Request) {
+  // Closed-loop requires premium_plus
+  const guard = await guardFeature('auto_rotation')
+  if (!guard.allowed) {
+    return NextResponse.json({ error: guard.error, upgrade: true }, { status: 403 })
+  }
+
   try {
     const userId = request.headers.get('x-user-id') || 'default-org'
     const tenantId = request.headers.get('x-tenant-id') || userId

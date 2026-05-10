@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { guardAddRepository } from '@/lib/subscriptionGuard'
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1'
 
@@ -35,6 +36,15 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  // Server-side subscription guard — cannot be bypassed from the browser
+  const guard = await guardAddRepository()
+  if (!guard.allowed) {
+    return NextResponse.json(
+      { error: guard.error, upgrade: true },
+      { status: 403 },
+    )
+  }
+
   try {
     const body = await request.json()
     const response = await fetch(`${BACKEND_URL}/repositories`, {
