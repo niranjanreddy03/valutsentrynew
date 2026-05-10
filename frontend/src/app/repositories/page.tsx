@@ -10,6 +10,7 @@ import { repositoryService } from '@/services/supabase'
 import { getAuthHeaders } from '@/lib/authHeaders'
 import { waitForScanCompletion } from '@/lib/pollScan'
 import { runPoliciesForScan } from '@/lib/runPoliciesForScan'
+import { useSubscription } from '@/contexts/SubscriptionContext'
 import {
     ExternalLink,
     FileDown,
@@ -53,6 +54,7 @@ export default function RepositoriesPage() {
   const demoReposLoadedRef = useRef(false)
   const toast = useToast()
   const router = useRouter()
+  const { limits, currentTier } = useSubscription()
 
   // New repository form
   const [newRepo, setNewRepo] = useState<{
@@ -224,6 +226,17 @@ export default function RepositoriesPage() {
   }, [fetchRepositories])
 
   const handleAddRepository = async () => {
+    // Enforce repo limit based on subscription tier
+    const maxRepos = limits?.max_repositories ?? 1
+    if (repositories.length >= maxRepos) {
+      toast.error(
+        'Repository limit reached',
+        `Your ${currentTier === 'basic' ? 'Starter' : 'Professional'} plan allows ${maxRepos} ${maxRepos === 1 ? 'repository' : 'repositories'}. Upgrade to add more.`,
+      )
+      router.push('/choose-plan')
+      return
+    }
+
     const repositoryUrl = normalizeRepositoryUrl(newRepo.url)
     const repositoryName = newRepo.name.trim() || extractRepoName(repositoryUrl)
     const repositoryBranch = newRepo.branch.trim() || 'main'
@@ -396,6 +409,26 @@ export default function RepositoriesPage() {
 
   const handleScanRepository = async (repoId: number) => {
     console.log('[SCAN] handleScanRepository called with repoId:', repoId)
+
+    // Enforce scan limit based on subscription tier
+    const maxScansPerDay = limits?.max_scans_per_day ?? 1
+    const scansPerWeek = limits?.scans_per_week ?? 1
+    if (currentTier === 'basic') {
+      // For basic users: check if they already have a completed/running scan today
+      const today = new Date().toISOString().slice(0, 10)
+      const todayScans = repositories.filter(
+        (r) => r.last_scan_at && r.last_scan_at.slice(0, 10) === today
+      )
+      if (todayScans.length >= maxScansPerDay) {
+        toast.error(
+          'Scan limit reached',
+          `Your Starter plan allows ${maxScansPerDay} scan per day and ${scansPerWeek} per week. Upgrade for more scans.`,
+        )
+        router.push('/choose-plan')
+        return
+      }
+    }
+
     const repo = repositories.find((r) => r.id === repoId)
 
     if (!repo) {
