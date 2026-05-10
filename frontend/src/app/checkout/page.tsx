@@ -6,18 +6,18 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import {
   ArrowLeft,
-  CheckCircle2,
+  Check,
   Lock,
   Shield,
   Loader2,
   Crown,
   Rocket,
+  Zap,
 } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 import { useToast } from '@/contexts/ToastContext'
 import { getAuthHeaders } from '@/lib/authHeaders'
 
-// Keep this in sync with /choose-plan PLANS.
 type PaidTier = 'premium' | 'premium_plus'
 type Cycle = 'monthly' | 'yearly'
 
@@ -26,8 +26,6 @@ interface PaidPlan {
   name: string
   tagline: string
   highlights: string[]
-  icon: typeof Rocket
-  gradient: string
 }
 
 const PAID_PLANS: Record<PaidTier, PaidPlan> = {
@@ -35,8 +33,6 @@ const PAID_PLANS: Record<PaidTier, PaidPlan> = {
     tier: 'premium',
     name: 'Professional',
     tagline: 'Best for growing teams',
-    icon: Rocket,
-    gradient: 'from-blue-500 to-indigo-600',
     highlights: [
       'Up to 25 repositories',
       '100 scans per week',
@@ -49,8 +45,6 @@ const PAID_PLANS: Record<PaidTier, PaidPlan> = {
     tier: 'premium_plus',
     name: 'Enterprise',
     tagline: 'For large organizations',
-    icon: Crown,
-    gradient: 'from-purple-500 to-pink-600',
     highlights: [
       'Unlimited repositories & scans',
       'ML-powered risk scoring',
@@ -61,7 +55,6 @@ const PAID_PLANS: Record<PaidTier, PaidPlan> = {
   },
 }
 
-// Minimal typing for the global Razorpay Checkout script.
 declare global {
   interface Window {
     Razorpay?: new (options: RazorpayOptions) => { open: () => void; on: (e: string, cb: (p: unknown) => void) => void }
@@ -99,22 +92,18 @@ function CheckoutInner() {
   const [processing, setProcessing] = useState(false)
   const [success, setSuccess] = useState(false)
   const [quote, setQuote] = useState<{ amountMajor: number; currency: string } | null>(null)
+  const [quoteError, setQuoteError] = useState(false)
 
-  // Guard: bad params → back to plan selection
   useEffect(() => {
     if (!plan) router.replace('/choose-plan')
   }, [plan, router])
 
-  // Guard: must be signed in.
   useEffect(() => {
     if (!authLoading && !isAuthenticated) {
       router.replace('/login?redirect=/choose-plan')
     }
   }, [authLoading, isAuthenticated, router])
 
-  const [quoteError, setQuoteError] = useState(false)
-
-  // Fetch a preview order to know the amount/currency for display.
   useEffect(() => {
     if (!plan || !isAuthenticated) return
     let cancelled = false
@@ -152,7 +141,6 @@ function CheckoutInner() {
     }
     setProcessing(true)
     try {
-      // 1) Server creates the order with a trusted amount.
       const orderRes = await fetch('/api/razorpay/create-order', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
@@ -165,7 +153,6 @@ function CheckoutInner() {
       }
       const order = await orderRes.json()
 
-      // 2) Open Razorpay Checkout modal.
       const rzp = new window.Razorpay({
         key: order.keyId,
         amount: order.amount,
@@ -179,7 +166,6 @@ function CheckoutInner() {
         },
         theme: { color: '#2563eb' },
         handler: async (response) => {
-          // 3) Browser posts signature back for server-side verification.
           try {
             const verifyRes = await fetch('/api/razorpay/verify', {
               method: 'POST',
@@ -196,9 +182,6 @@ function CheckoutInner() {
               throw new Error(err.error || 'Verification failed')
             }
             const data = await verifyRes.json()
-            // Server already promoted via service-role. Sync the local user
-            // cache so SubscriptionContext/UI reflect the new tier without
-            // requiring a full reload.
             await updateProfile({
               subscription_tier: plan.tier,
               subscription_started_at: new Date().toISOString(),
@@ -231,13 +214,11 @@ function CheckoutInner() {
 
   if (!plan) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-950">
-        <Loader2 className="w-8 h-8 text-slate-400 animate-spin" />
+      <div className="min-h-screen flex items-center justify-center bg-[#0a0a0f]">
+        <Loader2 className="w-5 h-5 text-white/40 animate-spin" />
       </div>
     )
   }
-
-  const Icon = plan.icon
 
   return (
     <>
@@ -246,105 +227,92 @@ function CheckoutInner() {
         strategy="afterInteractive"
         onLoad={() => setScriptReady(true)}
       />
-      <div
-        className="min-h-screen py-8 px-4"
-        style={{ background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%)' }}
-      >
-        <div className="max-w-4xl mx-auto">
-          {/* Top bar */}
-          <div className="flex items-center justify-between mb-8">
-            <Link
-              href="/choose-plan"
-              className="inline-flex items-center gap-2 text-sm text-gray-300 hover:text-white transition-colors"
-            >
-              <ArrowLeft className="w-4 h-4" />
-              Back to plans
-            </Link>
-            <div className="flex items-center gap-2 text-sm text-gray-300">
-              <Lock className="w-4 h-4 text-emerald-400" />
-              Secured by Razorpay
-            </div>
-          </div>
+      <div className="min-h-screen bg-[#0a0a0f] py-12 px-4">
+        <div className="max-w-lg mx-auto">
+          {/* Back link */}
+          <Link
+            href="/choose-plan"
+            className="inline-flex items-center gap-1.5 text-[13px] text-white/40 hover:text-white/60 transition-colors mb-8"
+          >
+            <ArrowLeft className="w-3.5 h-3.5" />
+            Back to plans
+          </Link>
 
-          {/* Brand */}
-          <div className="text-center mb-10">
-            <div className="inline-flex items-center gap-2">
-              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shadow-lg">
-                <Shield className="w-5 h-5 text-white" />
+          {success ? (
+            <div className="text-center py-16">
+              <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-emerald-500/10 border border-emerald-500/20 mb-4">
+                <Check className="w-5 h-5 text-emerald-400" />
               </div>
-              <span className="text-xl font-bold text-white">VaultSentry Pay</span>
+              <h2 className="text-xl font-semibold text-white mb-2">You&apos;re all set</h2>
+              <p className="text-[14px] text-white/50">
+                {plan.name} plan is active. Redirecting…
+              </p>
+              <div className="mt-6">
+                <div className="w-4 h-4 border-2 border-white/20 border-t-white/60 rounded-full animate-spin mx-auto" />
+              </div>
             </div>
-            <p className="text-sm text-gray-400 mt-2">Complete your subscription</p>
-          </div>
-
-          <div className="bg-slate-900/80 border border-gray-700/50 rounded-2xl p-6 sm:p-8 backdrop-blur">
-            {success ? (
-              <div className="py-10 text-center">
-                <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-emerald-500/15 border border-emerald-500/30 mb-5">
-                  <CheckCircle2 className="w-8 h-8 text-emerald-400" />
-                </div>
-                <h2 className="text-2xl font-bold text-white mb-2">Payment successful</h2>
-                <p className="text-gray-300">
-                  Your {plan.name} plan is now active. Redirecting to your dashboard…
+          ) : (
+            <div className="space-y-5">
+              {/* Order summary card */}
+              <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-5">
+                <p className="text-[11px] font-medium text-white/30 uppercase tracking-wider mb-4">
+                  Order summary
                 </p>
-                <Loader2 className="w-5 h-5 text-gray-400 animate-spin mx-auto mt-6" />
-              </div>
-            ) : (
-              <>
-                {/* Plan summary */}
-                <div className="flex items-start gap-4 pb-6 border-b border-gray-700/40">
-                  <div
-                    className={`w-12 h-12 rounded-xl bg-gradient-to-br ${plan.gradient} flex items-center justify-center flex-shrink-0 shadow-lg`}
-                  >
-                    <Icon className="w-6 h-6 text-white" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-lg font-bold text-white">{plan.name}</p>
-                    <p className="text-sm text-gray-400">{plan.tagline}</p>
-                    <p className="text-xs text-gray-500 mt-1 capitalize">
-                      {cycleParam} billing
-                    </p>
+
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-3">
+                    <div className={`w-8 h-8 rounded-md flex items-center justify-center ${
+                      plan.tier === 'premium' ? 'bg-blue-500/10' : 'bg-purple-500/10'
+                    }`}>
+                      {plan.tier === 'premium'
+                        ? <Zap className="w-4 h-4 text-blue-400" />
+                        : <Crown className="w-4 h-4 text-purple-400" />
+                      }
+                    </div>
+                    <div>
+                      <p className="text-[14px] font-medium text-white">{plan.name}</p>
+                      <p className="text-[12px] text-white/40 capitalize">{cycleParam} billing</p>
+                    </div>
                   </div>
                   <div className="text-right">
                     {priceLabel ? (
-                      <>
-                        <p className="text-2xl font-bold text-white">{priceLabel}</p>
-                        <p className="text-xs text-gray-500">
-                          per {cycleParam === 'yearly' ? 'year' : 'month'}
-                        </p>
-                      </>
+                      <p className="text-lg font-semibold text-white">{priceLabel}<span className="text-[12px] text-white/30 font-normal">/{cycleParam === 'yearly' ? 'yr' : 'mo'}</span></p>
+                    ) : quoteError ? (
+                      <p className="text-[13px] text-red-400">Error</p>
                     ) : (
-                      <Loader2 className="w-5 h-5 text-gray-400 animate-spin" />
+                      <div className="w-4 h-4 border-2 border-white/20 border-t-white/60 rounded-full animate-spin" />
                     )}
                   </div>
                 </div>
 
-                <ul className="mt-6 space-y-2">
+                <div className="border-t border-white/[0.04] pt-3 space-y-1.5">
                   {plan.highlights.map((h) => (
-                    <li key={h} className="flex items-start gap-2 text-sm text-gray-200">
-                      <CheckCircle2 className="w-4 h-4 text-emerald-400 mt-0.5 flex-shrink-0" />
-                      <span>{h}</span>
-                    </li>
+                    <div key={h} className="flex items-center gap-2">
+                      <Check className="w-3 h-3 text-emerald-400/60 flex-shrink-0" />
+                      <span className="text-[12px] text-white/40">{h}</span>
+                    </div>
                   ))}
-                </ul>
-
-                <div className="mt-8 p-4 rounded-lg bg-blue-500/10 border border-blue-500/20">
-                  <p className="text-xs text-blue-200 leading-relaxed">
-                    You&apos;ll be redirected to Razorpay&apos;s secure checkout to pay with
-                    UPI, card, net banking, or wallet. Your card details never touch our
-                    servers.
-                  </p>
                 </div>
+              </div>
+
+              {/* Payment info */}
+              <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-5">
+                <p className="text-[11px] font-medium text-white/30 uppercase tracking-wider mb-3">
+                  Payment
+                </p>
+                <p className="text-[13px] text-white/50 leading-relaxed">
+                  You&apos;ll be redirected to Razorpay to pay via UPI, card, net banking, or wallet. Your card details never touch our servers.
+                </p>
 
                 {quoteError && (
-                  <div className="mt-6 p-4 rounded-lg bg-red-500/10 border border-red-500/20">
-                    <p className="text-sm text-red-300">
-                      Could not connect to the payment server. Please try again.
+                  <div className="mt-4 p-3 rounded-lg bg-red-500/5 border border-red-500/10">
+                    <p className="text-[13px] text-red-400">
+                      Could not connect to payment server.
                     </p>
                     <button
                       type="button"
                       onClick={() => window.location.reload()}
-                      className="mt-2 text-xs text-red-400 hover:text-red-300 underline"
+                      className="mt-1.5 text-[12px] text-red-400/70 hover:text-red-300 underline underline-offset-2"
                     >
                       Retry
                     </button>
@@ -355,27 +323,30 @@ function CheckoutInner() {
                   type="button"
                   onClick={handlePay}
                   disabled={processing || !scriptReady || !quote || quoteError}
-                  className="mt-6 w-full py-3.5 px-4 rounded-xl font-semibold text-white bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 shadow-lg shadow-blue-500/25 transition-all flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
+                  className="mt-5 w-full py-3 px-4 rounded-lg text-[13px] font-medium text-white bg-blue-600 hover:bg-blue-500 transition-colors flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   {processing ? (
                     <>
-                      <Loader2 className="w-5 h-5 animate-spin" />
+                      <Loader2 className="w-4 h-4 animate-spin" />
                       Processing…
                     </>
                   ) : (
                     <>
-                      <Lock className="w-4 h-4" />
-                      Pay {priceLabel ?? ''} securely
+                      Pay {priceLabel ?? '…'} securely
                     </>
                   )}
                 </button>
 
-                <p className="mt-4 text-center text-xs text-gray-500">
-                  256-bit TLS · PCI-DSS compliant via Razorpay
-                </p>
-              </>
-            )}
-          </div>
+                <div className="mt-4 flex items-center justify-center gap-4 text-[11px] text-white/20">
+                  <span className="flex items-center gap-1">
+                    <Lock className="w-3 h-3" />
+                    256-bit TLS
+                  </span>
+                  <span>PCI-DSS compliant</span>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </>
@@ -386,8 +357,8 @@ export default function CheckoutPage() {
   return (
     <Suspense
       fallback={
-        <div className="min-h-screen flex items-center justify-center bg-slate-950">
-          <Loader2 className="w-8 h-8 text-slate-400 animate-spin" />
+        <div className="min-h-screen flex items-center justify-center bg-[#0a0a0f]">
+          <Loader2 className="w-5 h-5 text-white/40 animate-spin" />
         </div>
       }
     >
