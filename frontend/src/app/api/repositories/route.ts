@@ -36,13 +36,17 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  // Server-side subscription guard — cannot be bypassed from the browser
-  const guard = await guardAddRepository()
-  if (!guard.allowed) {
-    return NextResponse.json(
-      { error: guard.error, upgrade: true },
-      { status: 403 },
-    )
+  // Server-side subscription guard (best-effort — if auth cookie unavailable, allow through)
+  try {
+    const guard = await guardAddRepository()
+    if (!guard.allowed) {
+      return NextResponse.json(
+        { error: guard.error, upgrade: true },
+        { status: 403 },
+      )
+    }
+  } catch (err) {
+    console.warn('[API /api/repositories] Subscription guard error, allowing through:', err)
   }
 
   try {

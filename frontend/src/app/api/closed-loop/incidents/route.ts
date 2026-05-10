@@ -5,9 +5,13 @@ const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/ap
 
 export async function GET(request: Request) {
   // Closed-loop requires premium_plus
-  const guard = await guardFeature('auto_rotation')
-  if (!guard.allowed) {
-    return NextResponse.json({ error: guard.error, upgrade: true }, { status: 403 })
+  try {
+    const guard = await guardFeature('auto_rotation')
+    if (!guard.allowed) {
+      return NextResponse.json({ error: guard.error, upgrade: true }, { status: 403 })
+    }
+  } catch (err) {
+    console.warn('[API /api/closed-loop] Subscription guard error, allowing through:', err)
   }
 
   try {

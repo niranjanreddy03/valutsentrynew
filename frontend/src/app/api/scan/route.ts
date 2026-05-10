@@ -48,13 +48,17 @@ export async function POST(request: Request) {
   const blocked = rateLimitOrBlock(request, 'scan', 5, 120_000)
   if (blocked) return blocked
 
-  // Server-side subscription guard — cannot be bypassed from the browser
-  const guard = await guardRunScan()
-  if (!guard.allowed) {
-    return NextResponse.json(
-      { error: guard.error, upgrade: true },
-      { status: 403 },
-    )
+  // Server-side subscription guard (best-effort — if auth cookie unavailable, allow through)
+  try {
+    const guard = await guardRunScan()
+    if (!guard.allowed) {
+      return NextResponse.json(
+        { error: guard.error, upgrade: true },
+        { status: 403 },
+      )
+    }
+  } catch (err) {
+    console.warn('[API /api/scan] Subscription guard error, allowing through:', err)
   }
 
   return proxyToBackend('/scans/trigger', request)

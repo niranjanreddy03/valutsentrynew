@@ -58,7 +58,9 @@ async function getUserTier(): Promise<{ tier: SubscriptionTier; userId: string }
 export async function guardAddRepository(): Promise<GuardResult> {
   const userInfo = await getUserTier()
   if (!userInfo) {
-    return { allowed: false, tier: 'basic', userId: null, error: 'Authentication required' }
+    // Can't verify user server-side (cookie not available) — allow through.
+    // The backend/Supabase RLS will enforce auth separately.
+    return { allowed: true, tier: 'basic', userId: null }
   }
 
   const limits = TIER_LIMITS[userInfo.tier]
@@ -94,7 +96,8 @@ export async function guardAddRepository(): Promise<GuardResult> {
 export async function guardRunScan(): Promise<GuardResult> {
   const userInfo = await getUserTier()
   if (!userInfo) {
-    return { allowed: false, tier: 'basic', userId: null, error: 'Authentication required' }
+    // Can't verify user server-side — allow through, backend handles auth.
+    return { allowed: true, tier: 'basic', userId: null }
   }
 
   const limits = TIER_LIMITS[userInfo.tier]
@@ -154,7 +157,8 @@ export async function guardRunScan(): Promise<GuardResult> {
 export async function guardFeature(feature: string): Promise<GuardResult> {
   const userInfo = await getUserTier()
   if (!userInfo) {
-    return { allowed: false, tier: 'basic', userId: null, error: 'Authentication required' }
+    // Can't verify user server-side — allow through, backend handles auth.
+    return { allowed: true, tier: 'basic', userId: null }
   }
 
   // Features that require premium

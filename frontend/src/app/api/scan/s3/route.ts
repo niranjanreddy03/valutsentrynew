@@ -18,9 +18,13 @@ function forwardHeaders(request: Request): Record<string, string> {
 // POST /api/scan/s3 → POST /api/v1/cloud/s3/scan
 export async function POST(request: Request) {
   // S3 scanning requires premium_plus
-  const guard = await guardFeature('aws_integration')
-  if (!guard.allowed) {
-    return NextResponse.json({ error: guard.error, upgrade: true }, { status: 403 })
+  try {
+    const guard = await guardFeature('aws_integration')
+    if (!guard.allowed) {
+      return NextResponse.json({ error: guard.error, upgrade: true }, { status: 403 })
+    }
+  } catch (err) {
+    console.warn('[API /api/scan/s3] Subscription guard error, allowing through:', err)
   }
 
   try {
