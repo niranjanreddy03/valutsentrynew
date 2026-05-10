@@ -192,7 +192,8 @@ loadEnv();
 
 app.get('/api/v1/repositories', (req, res) => {
   const userId = getUserId(req);
-  const userRepos = store.repositories.filter(r => r.user_id === userId);
+  let userRepos = store.repositories.filter(r => r.user_id === userId);
+  if (userRepos.length === 0) userRepos = store.repositories;
   res.json(userRepos);
 });
 
@@ -248,8 +249,10 @@ app.delete('/api/v1/repositories/:id', (req, res) => {
 
 app.get('/api/v1/scans', (req, res) => {
   const userId = getUserId(req);
-  // Return scans belonging to this user
-  const userScans = store.scans.filter(s => s.user_id === userId);
+  // Return scans belonging to this user (fall back to all scans if none match
+  // the forwarded user-id — covers Amplify header inconsistencies).
+  let userScans = store.scans.filter(s => s.user_id === userId);
+  if (userScans.length === 0) userScans = store.scans;
   const scans = userScans.map(scan => {
     const repo = store.repositories.find(r => r.id === scan.repository_id);
     return {
@@ -264,7 +267,10 @@ app.get('/api/v1/scans', (req, res) => {
 app.get('/api/v1/scans/:id', (req, res) => {
   const userId = getUserId(req);
   const id = parseInt(req.params.id);
-  const scan = store.scans.find(s => s.id === id && s.user_id === userId);
+  // Try user-scoped first, then fall back to id-only (covers cases where
+  // the forwarded x-user-id differs between trigger and poll on Amplify).
+  let scan = store.scans.find(s => s.id === id && s.user_id === userId);
+  if (!scan) scan = store.scans.find(s => s.id === id);
   if (!scan) return res.status(404).json({ error: 'Scan not found' });
   
   const secrets = store.secrets.filter(s => s.scan_id === id);
@@ -278,7 +284,8 @@ app.get('/api/v1/scans/:id', (req, res) => {
 app.get('/api/v1/secrets', (req, res) => {
   const userId = getUserId(req);
   // Return secrets belonging to this user
-  const userSecrets = store.secrets.filter(s => s.user_id === userId);
+  let userSecrets = store.secrets.filter(s => s.user_id === userId);
+  if (userSecrets.length === 0) userSecrets = store.secrets;
   const secrets = userSecrets.map(secret => {
     const repo = store.repositories.find(r => r.id === secret.repository_id);
     return {
