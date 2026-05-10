@@ -1,5 +1,6 @@
 'use client'
 
+import FeatureGate from '@/components/FeatureGate'
 import Header from '@/components/layout/Header'
 import Sidebar from '@/components/layout/Sidebar'
 import { Badge, Button, Card, Skeleton } from '@/components/ui'
@@ -141,6 +142,18 @@ export default function AuditLogsPage() {
         <Header onMenuClick={() => setSidebarOpen(!sidebarOpen)} alertCount={0} />
         
         <main className="flex-1 overflow-y-auto overflow-x-hidden" style={{ background: 'var(--bg-primary)' }}>
+          <FeatureGate
+            feature="audit_logs"
+            title="Audit Logs"
+            description="Track all activity and changes across your workspace with detailed audit trails."
+            perks={[
+              'Complete activity history',
+              'User action tracking',
+              'Export logs for compliance',
+              'Advanced filtering and search',
+            ]}
+            requiredTier="premium"
+          >
           <div className="max-w-[1400px] mx-auto px-6 py-6 space-y-6">
             {/* Header */}
             <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
@@ -293,6 +306,7 @@ export default function AuditLogsPage() {
               )}
             </Card>
           </div>
+          </FeatureGate>
         </main>
       </div>
     </div>

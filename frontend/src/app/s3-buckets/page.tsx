@@ -1,5 +1,6 @@
 'use client'
 
+import FeatureGate from '@/components/FeatureGate'
 import Header from '@/components/layout/Header'
 import Sidebar from '@/components/layout/Sidebar'
 import { useToast } from '@/contexts/ToastContext'
@@ -234,6 +235,18 @@ export default function S3BucketsPage() {
       <div className="flex-1">
         <Header alertCount={0} onMenuClick={() => setSidebarOpen(!sidebarOpen)} />
         <main className="mx-auto max-w-6xl px-6 py-8">
+          <FeatureGate
+            feature="aws_integration"
+            title="AWS S3 Bucket Scanning"
+            description="Scan your S3 buckets for leaked credentials, API keys, and sensitive data."
+            perks={[
+              'Connect multiple AWS accounts',
+              'Automated bucket scanning',
+              'Real-time secret detection in objects',
+              'Compliance reporting for S3 assets',
+            ]}
+            requiredTier="premium_plus"
+          >
           <div className="mb-8 flex items-start justify-between gap-4">
             <div>
               <h1 className="flex items-center gap-2 text-2xl font-bold text-[var(--text-primary)]">
@@ -448,6 +461,7 @@ export default function S3BucketsPage() {
               ))}
             </div>
           )}
+          </FeatureGate>
         </main>
       </div>
 

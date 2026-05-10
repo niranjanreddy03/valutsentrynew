@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import FeatureGate from '@/components/FeatureGate'
 import Sidebar from '@/components/layout/Sidebar'
 import Header from '@/components/layout/Header'
 import { Button, Card, Input, Select, Badge } from '@/components/ui'
@@ -345,6 +346,18 @@ export default function PoliciesPage() {
         <Header onMenuClick={() => setSidebarOpen(!sidebarOpen)} alertCount={0} />
         
         <main className="flex-1 overflow-auto p-6">
+          <FeatureGate
+            feature="custom_patterns"
+            title="Custom Security Policies"
+            description="Define automated rules and actions for secret detection events."
+            perks={[
+              'Create custom detection patterns',
+              'Automated policy enforcement',
+              'Webhook integrations for alerts',
+              'Policy execution audit trail',
+            ]}
+            requiredTier="premium"
+          >
           {/* Page Header */}
           <div className="flex items-center justify-between mb-6">
             <div>
@@ -623,6 +636,7 @@ export default function PoliciesPage() {
               </Button>
             </div>
           )}
+          </FeatureGate>
         </main>
       </div>
 

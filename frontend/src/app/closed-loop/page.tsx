@@ -1,5 +1,6 @@
 'use client'
 
+import FeatureGate from '@/components/FeatureGate'
 import Header from '@/components/layout/Header'
 import Sidebar from '@/components/layout/Sidebar'
 import { Badge, Button, Card, Skeleton } from '@/components/ui'
@@ -211,6 +212,18 @@ export default function ClosedLoopPage() {
         <Header alertCount={metrics.active} onMenuClick={() => setSidebarOpen(!sidebarOpen)} />
 
         <main className="flex-1 overflow-y-auto bg-[var(--bg-primary)]">
+          <FeatureGate
+            feature="auto_rotation"
+            title="Closed-Loop Remediation"
+            description="Automatically validate, rotate, and remediate leaked secrets end-to-end."
+            perks={[
+              'Automated secret rotation',
+              'Leak validation and verification',
+              'Policy-driven remediation workflows',
+              'Complete audit evidence trail',
+            ]}
+            requiredTier="premium_plus"
+          >
           <div className="max-w-[1800px] mx-auto p-6 space-y-6">
             <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4">
               <div>
@@ -323,6 +336,7 @@ export default function ClosedLoopPage() {
               </div>
             </div>
           </div>
+          </FeatureGate>
         </main>
       </div>
     </div>

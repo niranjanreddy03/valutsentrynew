@@ -1,5 +1,6 @@
 'use client'
 
+import FeatureGate from '@/components/FeatureGate'
 import MLInsightsPanel from '@/components/dashboard/MLInsightsPanel'
 import SecretLifecycle from '@/components/dashboard/SecretLifecycle'
 import Header from '@/components/layout/Header'
@@ -265,11 +266,23 @@ export default function InsightsPage() {
     <div className="fixed inset-0 flex overflow-hidden" style={{ background: 'var(--bg-primary)' }}>
       <Sidebar isOpen={sidebarOpen} onToggle={() => setSidebarOpen(!sidebarOpen)} />
       <div className="flex-1 flex flex-col min-w-0">
-        <Header onMenuClick={() => setSidebarOpen(!sidebarOpen)} />
+        <Header onMenuClick={() => setSidebarOpen(!sidebarOpen)} alertCount={0} />
         <main
           className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden"
           style={{ background: 'var(--bg-primary)' }}
         >
+          <FeatureGate
+            feature="ml_risk_scoring"
+            title="ML-Powered Insights"
+            description="Advanced machine learning models analyze your secrets for risk scoring and lifecycle tracking."
+            perks={[
+              'AI-driven risk scoring for each secret',
+              'Secret lifecycle analytics',
+              'Mean-time-to-remediation tracking',
+              'Predictive threat intelligence',
+            ]}
+            requiredTier="premium"
+          >
           <div className="max-w-[1400px] mx-auto px-6 pt-5 pb-8 space-y-6">
             <header className="flex items-center gap-3">
               <div className="grid h-10 w-10 place-items-center rounded-lg bg-blue-500/10 text-blue-400 border border-blue-500/30">
@@ -302,6 +315,7 @@ export default function InsightsPage() {
               />
             </section>
           </div>
+          </FeatureGate>
         </main>
       </div>
     </div>
