@@ -356,13 +356,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (event === 'SIGNED_OUT') {
           router.push('/login')
         } else if (event === 'SIGNED_IN') {
-          // Check if user needs MFA challenge before entering the app
-          const mfaNeeded = await userHasVerifiedMfa(supabase)
-          if (mfaNeeded) {
-            router.push('/mfa-challenge')
-          } else {
-            router.push('/')
-          }
+          // Check if user needs MFA challenge before entering the app.
+          // Wrapped in setTimeout to avoid deadlocking the auth listener
+          // (see comment above — no awaits directly inside the callback).
+          setTimeout(() => {
+            userHasVerifiedMfa(supabase).then((mfaNeeded) => {
+              if (mfaNeeded) {
+                router.push('/mfa-challenge')
+              } else {
+                router.push('/')
+              }
+            }).catch(() => {
+              router.push('/')
+            })
+          }, 0)
         } else if (event === 'MFA_CHALLENGE_VERIFIED') {
           // Only redirect to dashboard when this is the post-login MFA gate
           // (`/mfa-challenge`). For step-up MFA on any other page (settings,
