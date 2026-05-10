@@ -92,6 +92,14 @@ function CheckoutInner() {
   const [processing, setProcessing] = useState(false)
   const [success, setSuccess] = useState(false)
   const [quote, setQuote] = useState<{ amountMajor: number; currency: string } | null>(null)
+  const [billing, setBilling] = useState({
+    fullName: '',
+    address: '',
+    city: '',
+    state: '',
+    zip: '',
+    country: 'India',
+  })
   const [quoteError, setQuoteError] = useState(false)
 
   useEffect(() => {
@@ -161,8 +169,15 @@ function CheckoutInner() {
         description: `${plan.name} · ${cycleParam === 'yearly' ? 'Annual' : 'Monthly'}`,
         order_id: order.orderId,
         prefill: {
-          name: user?.full_name ?? undefined,
+          name: billing.fullName || user?.full_name || undefined,
           email: user?.email ?? undefined,
+        },
+        notes: {
+          billing_address: billing.address,
+          billing_city: billing.city,
+          billing_state: billing.state,
+          billing_zip: billing.zip,
+          billing_country: billing.country,
         },
         theme: { color: '#2563eb' },
         handler: async (response) => {
@@ -305,6 +320,85 @@ function CheckoutInner() {
                   <div className="flex items-center gap-1.5 text-[12px] text-white/25">
                     <Lock className="w-3 h-3" />
                     Secure checkout
+                  </div>
+                </div>
+              </div>
+
+              {/* Billing Address */}
+              <div className="lg:col-span-3 rounded-xl border border-white/[0.06] bg-white/[0.02] p-6">
+                <p className="text-[11px] font-medium text-white/30 uppercase tracking-wider mb-4">
+                  Billing address
+                </p>
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-[12px] text-white/40 mb-1">Full name</label>
+                    <input
+                      type="text"
+                      value={billing.fullName}
+                      onChange={(e) => setBilling({ ...billing, fullName: e.target.value })}
+                      placeholder={user?.full_name || 'John Doe'}
+                      className="w-full px-3 py-2 rounded-lg bg-white/[0.04] border border-white/[0.08] text-[13px] text-white placeholder:text-white/20 focus:outline-none focus:border-white/[0.15] transition-colors"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[12px] text-white/40 mb-1">Street address</label>
+                    <input
+                      type="text"
+                      value={billing.address}
+                      onChange={(e) => setBilling({ ...billing, address: e.target.value })}
+                      placeholder="123 Main St, Apt 4"
+                      className="w-full px-3 py-2 rounded-lg bg-white/[0.04] border border-white/[0.08] text-[13px] text-white placeholder:text-white/20 focus:outline-none focus:border-white/[0.15] transition-colors"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-[12px] text-white/40 mb-1">City</label>
+                      <input
+                        type="text"
+                        value={billing.city}
+                        onChange={(e) => setBilling({ ...billing, city: e.target.value })}
+                        placeholder="Hyderabad"
+                        className="w-full px-3 py-2 rounded-lg bg-white/[0.04] border border-white/[0.08] text-[13px] text-white placeholder:text-white/20 focus:outline-none focus:border-white/[0.15] transition-colors"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[12px] text-white/40 mb-1">State</label>
+                      <input
+                        type="text"
+                        value={billing.state}
+                        onChange={(e) => setBilling({ ...billing, state: e.target.value })}
+                        placeholder="Telangana"
+                        className="w-full px-3 py-2 rounded-lg bg-white/[0.04] border border-white/[0.08] text-[13px] text-white placeholder:text-white/20 focus:outline-none focus:border-white/[0.15] transition-colors"
+                      />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-[12px] text-white/40 mb-1">ZIP / Postal code</label>
+                      <input
+                        type="text"
+                        value={billing.zip}
+                        onChange={(e) => setBilling({ ...billing, zip: e.target.value })}
+                        placeholder="500001"
+                        className="w-full px-3 py-2 rounded-lg bg-white/[0.04] border border-white/[0.08] text-[13px] text-white placeholder:text-white/20 focus:outline-none focus:border-white/[0.15] transition-colors"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[12px] text-white/40 mb-1">Country</label>
+                      <select
+                        value={billing.country}
+                        onChange={(e) => setBilling({ ...billing, country: e.target.value })}
+                        className="w-full px-3 py-2 rounded-lg bg-white/[0.04] border border-white/[0.08] text-[13px] text-white focus:outline-none focus:border-white/[0.15] transition-colors"
+                      >
+                        <option value="India">India</option>
+                        <option value="United States">United States</option>
+                        <option value="United Kingdom">United Kingdom</option>
+                        <option value="Canada">Canada</option>
+                        <option value="Australia">Australia</option>
+                        <option value="Germany">Germany</option>
+                        <option value="Singapore">Singapore</option>
+                      </select>
+                    </div>
                   </div>
                 </div>
               </div>
