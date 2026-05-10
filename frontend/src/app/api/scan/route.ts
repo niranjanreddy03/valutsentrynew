@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server'
 import { rateLimitOrBlock } from '@/lib/rate-limit'
-import { guardRunScan } from '@/lib/subscriptionGuard'
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1'
 
@@ -48,18 +47,9 @@ export async function POST(request: Request) {
   const blocked = rateLimitOrBlock(request, 'scan', 5, 120_000)
   if (blocked) return blocked
 
-  // Server-side subscription guard (best-effort — if auth cookie unavailable, allow through)
-  try {
-    const guard = await guardRunScan()
-    if (!guard.allowed) {
-      return NextResponse.json(
-        { error: guard.error, upgrade: true },
-        { status: 403 },
-      )
-    }
-  } catch (err) {
-    console.warn('[API /api/scan] Subscription guard error, allowing through:', err)
-  }
+  // Subscription limits enforced on frontend + Supabase RLS.
+  // Server-side guard removed — Amplify SSR doesn't forward cookies
+  // reliably, causing false 403s.
 
   return proxyToBackend('/scans/trigger', request)
 }
