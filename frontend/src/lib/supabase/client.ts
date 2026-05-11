@@ -1,5 +1,5 @@
 import { createBrowserClient } from '@supabase/ssr'
-import { createClient as createSupabaseClient, SupabaseClient } from '@supabase/supabase-js'
+import { SupabaseClient } from '@supabase/supabase-js'
 import { Database, Tables } from './types'
 
 export type TypedSupabaseClient = SupabaseClient<Database>
@@ -17,9 +17,10 @@ const noopLock = async <R>(_name: string, _timeout: number, fn: () => Promise<R>
   return await fn()
 }
 
-// Use the standard Supabase client for better type inference
+// Use the SSR browser client so OAuth callback sessions stored in cookies are
+// visible to client-side auth checks after `/auth/callback` redirects back.
 export function createClient(): TypedSupabaseClient {
-  return createSupabaseClient<Database>(
+  return createBrowserClient<Database>(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {

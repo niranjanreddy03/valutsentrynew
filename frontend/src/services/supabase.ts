@@ -1,4 +1,5 @@
 import { getSupabaseClient } from '@/lib/supabase/client'
+import { getAuthRedirectUrl } from '@/lib/authRedirect'
 
 /**
  * Lazy proxy to the Supabase browser client.
@@ -62,7 +63,7 @@ export const authService = {
     const { data, error } = await supabase.auth.signInWithOAuth({
       provider,
       options: {
-        redirectTo: `${window.location.origin}/auth/callback`,
+        redirectTo: getAuthRedirectUrl('/auth/callback'),
       },
     })
     if (error) throw error
@@ -78,7 +79,7 @@ export const authService = {
   async resetPassword(email: string) {
     const supabase = getSupabaseClient()
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/reset-password`,
+      redirectTo: getAuthRedirectUrl('/reset-password'),
     })
     if (error) throw error
   },

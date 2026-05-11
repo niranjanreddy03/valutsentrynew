@@ -5,9 +5,8 @@ import { NextResponse, type NextRequest } from 'next/server'
  * Middleware — session refresh + hijack-prevention hardening.
  *
  * Responsibilities (in order):
- *   1. Apply strict cookie flags to every Supabase auth cookie we set or
- *      touch (HttpOnly, Secure in prod, SameSite=Lax for login-redirect
- *      compatibility, __Host- prefix where possible).
+ *   1. Apply consistent cookie flags to every Supabase auth cookie we set or
+ *      touch (Secure in prod, SameSite=Lax for login-redirect compatibility).
  *   2. Refresh the Supabase session and make the fresh access token
  *      available to the downstream request.
  *   3. Gate protected routes.
@@ -53,7 +52,7 @@ const isProd = process.env.NODE_ENV === 'production'
 function hardenCookie(options: CookieOptions): CookieOptions {
   return {
     ...options,
-    httpOnly: true,
+    httpOnly: false,
     secure: isProd,
     sameSite: 'lax',
     path: options.path ?? '/',

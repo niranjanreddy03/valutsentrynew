@@ -3,6 +3,7 @@
 import { getSupabaseClient } from '@/lib/supabase/client'
 import type { UpdateUser, User } from '@/lib/supabase/types'
 import { getLocalMfaFactor } from '@/lib/localMfa'
+import { getAuthRedirectUrl } from '@/lib/authRedirect'
 import { Session, SupabaseClient, User as SupabaseUser } from '@supabase/supabase-js'
 import { useRouter } from 'next/navigation'
 import { createContext, ReactNode, useCallback, useContext, useEffect, useState } from 'react'
@@ -537,7 +538,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const { error } = await supabase.auth.signInWithOAuth({
       provider,
       options: {
-        redirectTo: `${window.location.origin}/auth/callback`,
+        redirectTo: getAuthRedirectUrl('/auth/callback'),
       },
     })
     if (error) throw error
@@ -569,7 +570,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           password,
           options: {
             data: { full_name: fullName },
-            emailRedirectTo: `${window.location.origin}/auth/callback`,
+            emailRedirectTo: getAuthRedirectUrl('/auth/callback'),
             ...(captchaToken ? { captchaToken } : {}),
           },
         })
@@ -740,7 +741,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const forgotPassword = async (email: string, captchaToken?: string) => {
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/reset-password`,
+      redirectTo: getAuthRedirectUrl('/reset-password'),
       ...(captchaToken ? { captchaToken } : {}),
     })
     if (error) throw error
