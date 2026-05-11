@@ -1173,68 +1173,67 @@ function Pricing() {
   ]
   return (
     <section id="pricing" className="relative py-28 sm:py-36">
-      <div className="mx-auto w-full max-w-[1600px] px-6 xl:px-12">
+      <div className="mx-auto w-full max-w-[1200px] px-6 xl:px-12">
         <Reveal>
           <div className="mb-14 max-w-2xl">
             <Eyebrow>Pricing</Eyebrow>
             <h2
-              className="mt-5 text-4xl font-bold tracking-tight sm:text-5xl md:text-6xl"
-              style={{ color: C.text, letterSpacing: '-0.025em' }}
+              className="mt-5 text-3xl font-semibold tracking-tight sm:text-4xl"
+              style={{ color: C.text, letterSpacing: '-0.02em' }}
             >
-              Pay for what you use. <br />
-              <GradientText>Not what you might.</GradientText>
+              Simple pricing. <br />
+              No surprises.
             </h2>
+            <p className="mt-4 text-base" style={{ color: C.textMuted }}>
+              Start free, scale when you need to. All plans include core secret scanning.
+            </p>
           </div>
         </Reveal>
 
-        <div className="grid gap-5 md:grid-cols-3">
+        <div className="grid gap-4 md:grid-cols-3">
           {tiers.map((t, i) => (
             <Reveal key={t.name} delay={i * 80}>
               <div
-                className="relative h-full overflow-hidden rounded-3xl p-7 transition-all duration-500 hover:-translate-y-1"
+                className="relative h-full rounded-xl p-6 transition-all duration-200"
                 style={{
                   background: t.highlight
-                    ? 'linear-gradient(180deg, rgba(96,165,250,0.14), rgba(167,139,250,0.06))'
-                    : `linear-gradient(180deg, ${C.surface}, rgba(20,22,30,0.7))`,
-                  border: t.highlight ? '1px solid rgba(96,165,250,0.45)' : `1px solid ${C.border}`,
-                  boxShadow: t.highlight ? '0 30px 60px -30px rgba(96,165,250,0.55)' : 'none',
+                    ? 'rgba(96,165,250,0.04)'
+                    : C.surface,
+                  border: t.highlight ? '1px solid rgba(96,165,250,0.25)' : `1px solid ${C.border}`,
                 }}
               >
                 {t.highlight && (
-                  <div
-                    className="absolute -top-3 left-7 inline-flex items-center gap-1 rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-white"
-                    style={{ background: GRADIENT, boxShadow: '0 8px 20px -8px rgba(96,165,250,0.55)' }}
-                  >
-                    <Sparkles className="h-3 w-3" /> Most popular
+                  <div className="absolute -top-2.5 left-5">
+                    <span
+                      className="inline-flex items-center rounded-full px-2.5 py-0.5 text-[10px] font-medium"
+                      style={{ color: '#60a5fa', background: 'rgba(96,165,250,0.1)', border: '1px solid rgba(96,165,250,0.2)' }}
+                    >
+                      Recommended
+                    </span>
                   </div>
                 )}
-                <h3 className="text-base font-semibold uppercase tracking-[0.18em]" style={{ color: '#93c5fd' }}>
+                <h3 className="text-sm font-semibold tracking-wide" style={{ color: C.textSecondary }}>
                   {t.name}
                 </h3>
-                <p className="mt-2 text-sm" style={{ color: C.textMuted }}>{t.desc}</p>
-                <div className="mt-6 flex items-baseline gap-2">
-                  <span className="text-5xl font-bold tracking-tight" style={{ color: C.text, letterSpacing: '-0.03em' }}>
+                <p className="mt-1 text-[13px]" style={{ color: C.textMuted }}>{t.desc}</p>
+                <div className="mt-5 flex items-baseline gap-1.5">
+                  <span className="text-3xl font-bold tracking-tight" style={{ color: C.text }}>
                     {t.price}
                   </span>
                   {t.period && (
                     <span className="text-sm" style={{ color: C.textMuted }}>/ {t.period}</span>
                   )}
                 </div>
-                <div className="my-6 h-px" style={{ background: C.border }} />
-                <ul className="space-y-3">
+                <div className="my-5 h-px" style={{ background: C.border }} />
+                <ul className="space-y-2.5">
                   {t.features.map((f) => (
-                    <li key={f} className="flex items-start gap-2.5 text-sm" style={{ color: C.text }}>
-                      <span
-                        className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full"
-                        style={{ background: 'rgba(34,197,94,0.15)' }}
-                      >
-                        <Check className="h-3 w-3" style={{ color: C.green }} />
-                      </span>
+                    <li key={f} className="flex items-start gap-2 text-[13px]" style={{ color: C.textSecondary }}>
+                      <Check className="mt-0.5 h-3.5 w-3.5 shrink-0" style={{ color: C.green, opacity: 0.7 }} />
                       {f}
                     </li>
                   ))}
                 </ul>
-                <div className="mt-7">
+                <div className="mt-6">
                   {t.highlight ? (
                     <PrimaryButton href={t.href} className="w-full">{t.cta}</PrimaryButton>
                   ) : (

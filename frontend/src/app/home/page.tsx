@@ -15,6 +15,7 @@ import { useEffect, useState } from 'react'
 import { useAuth } from '@/contexts/AuthContext'
 import {
   ArrowRight,
+  Check,
   CheckCircle2,
   Cloud,
   FileSearch,
@@ -524,19 +525,14 @@ export default function HomePage() {
         className="relative z-10 mx-auto max-w-7xl px-6 py-20 md:py-24"
       >
         <div className="mx-auto mb-12 max-w-2xl text-center">
-          <div className="inline-flex items-center gap-2 rounded-full border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 py-1 text-xs text-[var(--text-muted)]">
-            <Sparkles className="h-3.5 w-3.5 text-[var(--accent)]" />
+          <p className="text-xs font-medium uppercase tracking-widest text-[var(--text-muted)] mb-4">
             Pricing
-          </div>
-          <h2 className="mt-4 text-3xl font-bold tracking-tight md:text-4xl">
-            Simple plans. Priced in{' '}
-            <span className="bg-gradient-to-r from-indigo-400 to-sky-400 bg-clip-text text-transparent">
-              rupees
-            </span>
-            .
+          </p>
+          <h2 className="text-3xl font-semibold tracking-tight text-[var(--text-primary)] md:text-4xl">
+            Simple, transparent pricing
           </h2>
           <p className="mt-3 text-[var(--text-muted)]">
-            Start free, upgrade when you outgrow it. Cancel anytime — no lock-in.
+            Start free, upgrade when you need more. Cancel anytime.
           </p>
         </div>
 
@@ -741,32 +737,28 @@ function PricingCard({
 }) {
   return (
     <div
-      className="relative flex flex-col rounded-2xl p-7 transition-transform"
+      className="relative flex flex-col rounded-xl p-6"
       style={{
-        background: 'var(--card-bg)',
-        border: popular ? '1px solid var(--accent)' : '1px solid var(--border-color)',
-        boxShadow: popular
-          ? '0 0 0 4px color-mix(in srgb, var(--accent) 15%, transparent)'
-          : 'none',
-        transform: popular ? 'translateY(-6px)' : 'none',
+        background: popular ? 'rgba(99,102,241,0.04)' : 'var(--card-bg)',
+        border: popular ? '1px solid rgba(99,102,241,0.25)' : '1px solid var(--border-color)',
       }}
     >
       {popular && (
-        <div className="absolute -top-3 left-1/2 -translate-x-1/2">
+        <div className="absolute -top-2.5 left-5">
           <span
-            className="rounded-full px-3 py-1 text-[11px] font-semibold text-white"
-            style={{ background: 'var(--accent)' }}
+            className="rounded-full px-2.5 py-0.5 text-[10px] font-medium"
+            style={{ color: 'var(--accent)', background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.2)' }}
           >
-            Most Popular
+            Recommended
           </span>
         </div>
       )}
 
-      <div className="text-lg font-semibold text-[var(--text-primary)]">{name}</div>
-      <p className="mt-1 text-sm text-[var(--text-muted)]">{tagline}</p>
+      <div className="text-[15px] font-semibold text-[var(--text-primary)]">{name}</div>
+      <p className="mt-1 text-[13px] text-[var(--text-muted)]">{tagline}</p>
 
-      <div className="mt-5 flex items-baseline gap-1">
-        <span className="text-4xl font-extrabold tracking-tight text-[var(--text-primary)]">
+      <div className="mt-4 flex items-baseline gap-1">
+        <span className="text-3xl font-bold tracking-tight text-[var(--text-primary)]">
           {priceLabel}
         </span>
         {priceSuffix && (
@@ -774,10 +766,10 @@ function PricingCard({
         )}
       </div>
 
-      <ul className="mt-6 space-y-2.5">
+      <ul className="mt-5 space-y-2">
         {features.map((f) => (
-          <li key={f} className="flex items-start gap-2 text-sm text-[var(--text-secondary)]">
-            <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-400" />
+          <li key={f} className="flex items-start gap-2 text-[13px] text-[var(--text-secondary)]">
+            <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-400 opacity-70" />
             <span>{f}</span>
           </li>
         ))}
@@ -786,16 +778,15 @@ function PricingCard({
       <button
         type="button"
         onClick={onClick}
-        className="mt-7 inline-flex items-center justify-center gap-1.5 rounded-xl px-4 py-2.5 text-sm font-semibold transition-all hover:-translate-y-0.5"
+        className="mt-6 inline-flex items-center justify-center gap-1.5 rounded-lg px-4 py-2.5 text-[13px] font-medium transition-colors"
         style={{
           background: popular ? 'var(--accent)' : 'var(--bg-secondary)',
           color: popular ? 'white' : 'var(--text-primary)',
           border: popular ? 'none' : '1px solid var(--border-color)',
-          boxShadow: popular ? '0 10px 30px rgba(99,102,241,0.35)' : 'none',
         }}
       >
         {ctaLabel}
-        <ArrowRight className="h-4 w-4" />
+        <ArrowRight className="h-3.5 w-3.5" />
       </button>
     </div>
   )

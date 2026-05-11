@@ -6,11 +6,10 @@ import { useAuth } from '@/contexts/AuthContext'
 import { useToast } from '@/contexts/ToastContext'
 import {
   Check,
-  ChevronRight,
-  Crown,
-  Rocket,
+  ArrowRight,
+  Zap,
+  Building2,
   Shield,
-  Sparkles,
 } from 'lucide-react'
 
 interface Plan {
@@ -27,9 +26,6 @@ interface Plan {
     scans: number | string
     retention: string
   }
-  icon: typeof Shield
-  gradient: string
-  buttonGradient: string
 }
 
 const PLANS: Plan[] = [
@@ -39,18 +35,14 @@ const PLANS: Plan[] = [
     tier: 'basic',
     price: 0,
     yearlyPrice: 0,
-    tagline: 'Perfect for individual developers',
-    icon: Shield,
-    gradient: 'from-slate-500 to-slate-700',
-    buttonGradient: 'from-slate-600 to-slate-800',
+    tagline: 'For solo developers exploring secret detection',
     limits: { repos: 5, scans: 10, retention: '7 days' },
     features: [
-      'Up to 5 repositories',
+      '5 repositories',
       '10 scans per week',
       'Basic secret detection',
       'Email notifications',
       '7-day scan history',
-      'Community support',
     ],
   },
   {
@@ -59,21 +51,16 @@ const PLANS: Plan[] = [
     tier: 'premium',
     price: 299,
     yearlyPrice: 2990,
-    tagline: 'Best for growing teams',
+    tagline: 'For teams shipping code daily',
     popular: true,
-    icon: Rocket,
-    gradient: 'from-blue-500 to-indigo-600',
-    buttonGradient: 'from-blue-600 to-indigo-700',
     limits: { repos: 25, scans: 100, retention: '90 days' },
     features: [
-      'Up to 25 repositories',
+      '25 repositories',
       '100 scans per week',
-      'Advanced secret detection',
       'Slack & Jira integration',
       'Team management',
-      'Scheduled scans',
-      'API access',
-      '90-day scan history',
+      'Scheduled scans & API access',
+      '90-day history',
       'Priority support',
     ],
   },
@@ -83,22 +70,15 @@ const PLANS: Plan[] = [
     tier: 'premium_plus',
     price: 999,
     yearlyPrice: 9990,
-    tagline: 'For large organizations',
-    icon: Crown,
-    gradient: 'from-purple-500 to-pink-600',
-    buttonGradient: 'from-purple-600 to-pink-700',
-    limits: { repos: 'Unlimited', scans: 'Unlimited', retention: '365 days' },
+    tagline: 'For organizations with strict compliance needs',
+    limits: { repos: 'Unlimited', scans: 'Unlimited', retention: '1 year' },
     features: [
-      'Unlimited repositories',
-      'Unlimited scans',
+      'Unlimited repos & scans',
       'ML-powered risk scoring',
       'Auto secret rotation',
       'SSO / SAML',
-      'Custom branding',
-      'Webhook notifications',
+      'Audit logs & custom branding',
       'Export reports (PDF/CSV)',
-      'Audit logs',
-      '365-day scan history',
       'Dedicated support',
     ],
   },
@@ -113,8 +93,6 @@ export default function ChoosePlanPage() {
   const [processing, setProcessing] = useState(false)
 
   useEffect(() => {
-    // Allow authenticated users to visit this page to upgrade their plan.
-    // Only redirect unauthenticated users to login.
     if (!isLoading && !isAuthenticated) {
       router.push('/login?redirect=/choose-plan')
     }
@@ -123,9 +101,6 @@ export default function ChoosePlanPage() {
   const handleSelectPlan = async (plan: Plan) => {
     setSelectedPlan(plan.id)
     if (plan.tier === 'basic') {
-      // Free plan — activate basic tier immediately and route to dashboard.
-      // Feature limits (1 repo, 1 scan/week, etc.) apply automatically via
-      // SubscriptionContext reading user.subscription_tier.
       setProcessing(true)
       try {
         if (user) {
@@ -137,8 +112,6 @@ export default function ChoosePlanPage() {
               trial_ends_at: null,
             })
           } catch (err) {
-            // Non-fatal: Supabase write can fail in demo mode / offline —
-            // user already defaults to 'basic' in AuthContext fetchUserProfile.
             console.warn('Could not persist free-plan selection:', err)
           }
         }
@@ -151,8 +124,6 @@ export default function ChoosePlanPage() {
         setProcessing(false)
       }
     } else {
-      // Paid plan — redirect to the checkout gateway. The gateway handles
-      // payment, persists the upgraded tier, then bounces back to the dashboard.
       const params = new URLSearchParams({
         plan: plan.tier,
         cycle: billingCycle,
@@ -163,120 +134,125 @@ export default function ChoosePlanPage() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center" style={{ background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%)' }}>
-        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
+      <div className="min-h-screen flex items-center justify-center bg-[#0a0a0f]">
+        <div className="w-5 h-5 border-2 border-white/20 border-t-white/80 rounded-full animate-spin" />
       </div>
     )
   }
 
   return (
-    <div className="min-h-screen py-8 px-4" style={{ background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%)' }}>
-      <div className="max-w-6xl mx-auto">
+    <div className="min-h-screen bg-[#0a0a0f] py-16 px-4">
+      <div className="max-w-5xl mx-auto">
         {/* Header */}
-        <div className="text-center mb-12">
-          <div className="flex items-center justify-center gap-3 mb-4">
-            <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-blue-500/25">
-              <Shield className="w-7 h-7 text-white" />
-            </div>
+        <div className="text-center mb-14">
+          <div className="inline-flex items-center justify-center w-10 h-10 rounded-lg bg-white/[0.04] border border-white/[0.06] mb-6">
+            <Shield className="w-5 h-5 text-white/70" />
           </div>
-          <h1 className="text-4xl font-bold text-white mb-3">
-            Welcome to VaultSentry
+          <h1 className="text-3xl font-semibold text-white tracking-tight">
+            Pick your plan
           </h1>
-          <p className="text-lg text-gray-400 max-w-xl mx-auto">
-            Choose a plan that fits your needs. You can always change later.
+          <p className="mt-3 text-[15px] text-white/50 max-w-md mx-auto">
+            Start free, upgrade when you need more. All plans include core secret scanning.
           </p>
-          
+
           {/* Billing toggle */}
-          <div className="mt-8 flex items-center justify-center gap-4">
-            <span className={`text-sm font-medium ${billingCycle === 'monthly' ? 'text-white' : 'text-gray-500'}`}>
-              Monthly
-            </span>
+          <div className="mt-8 inline-flex items-center gap-3 bg-white/[0.03] border border-white/[0.06] rounded-full px-1.5 py-1.5">
             <button
-              onClick={() => setBillingCycle(billingCycle === 'monthly' ? 'yearly' : 'monthly')}
-              className="relative inline-flex h-7 w-14 items-center rounded-full bg-gray-700 transition-colors border border-gray-600"
+              onClick={() => setBillingCycle('monthly')}
+              className={`px-4 py-1.5 rounded-full text-sm font-medium transition-all ${
+                billingCycle === 'monthly'
+                  ? 'bg-white/[0.08] text-white'
+                  : 'text-white/40 hover:text-white/60'
+              }`}
             >
-              <span
-                className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${
-                  billingCycle === 'yearly' ? 'translate-x-8' : 'translate-x-1'
-                }`}
-              />
+              Monthly
             </button>
-            <span className={`text-sm font-medium ${billingCycle === 'yearly' ? 'text-white' : 'text-gray-500'}`}>
+            <button
+              onClick={() => setBillingCycle('yearly')}
+              className={`px-4 py-1.5 rounded-full text-sm font-medium transition-all ${
+                billingCycle === 'yearly'
+                  ? 'bg-white/[0.08] text-white'
+                  : 'text-white/40 hover:text-white/60'
+              }`}
+            >
               Yearly
-              <span className="ml-1.5 text-xs text-emerald-400 font-semibold px-2 py-0.5 rounded-full bg-emerald-500/10">Save 17%</span>
-            </span>
+              <span className="ml-1.5 text-[11px] text-emerald-400 font-medium">−17%</span>
+            </button>
           </div>
         </div>
 
         {/* Plans */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-5xl mx-auto">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           {PLANS.map((plan) => {
             const price = billingCycle === 'yearly' ? Math.round(plan.yearlyPrice / 12) : plan.price
-            const Icon = plan.icon
-            
+            const isSelected = selectedPlan === plan.id
+
             return (
               <div
                 key={plan.id}
-                className={`relative rounded-2xl border transition-all duration-300 ${
-                  plan.popular 
-                    ? 'bg-gradient-to-b from-blue-950/80 to-slate-900/90 border-blue-500/50 shadow-xl shadow-blue-500/10 scale-[1.03] z-10' 
-                    : 'bg-slate-900/70 border-gray-700/50 hover:border-gray-600'
-                } ${selectedPlan === plan.id ? 'ring-2 ring-blue-400' : ''}`}
+                className={`relative rounded-xl border transition-all duration-200 ${
+                  plan.popular
+                    ? 'bg-white/[0.03] border-blue-500/30'
+                    : 'bg-white/[0.015] border-white/[0.06] hover:border-white/[0.1]'
+                } ${isSelected ? 'ring-1 ring-blue-400/50' : ''}`}
               >
                 {plan.popular && (
-                  <div className="absolute -top-3.5 left-1/2 -translate-x-1/2">
-                    <span className="bg-gradient-to-r from-blue-500 to-indigo-600 text-white text-xs font-bold px-4 py-1.5 rounded-full shadow-lg flex items-center gap-1.5">
-                      <Sparkles className="w-3.5 h-3.5" />
-                      MOST POPULAR
+                  <div className="absolute -top-3 left-6">
+                    <span className="text-[11px] font-medium text-blue-400 bg-blue-500/10 border border-blue-500/20 px-2.5 py-0.5 rounded-full">
+                      Recommended
                     </span>
                   </div>
                 )}
 
-                <div className="p-7">
-                  {/* Plan header */}
-                  <div className="flex items-center gap-3 mb-2">
-                    <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${plan.gradient} flex items-center justify-center shadow-lg`}>
-                      <Icon className="w-5 h-5 text-white" />
+                <div className="p-6">
+                  {/* Plan name */}
+                  <div className="flex items-center gap-2.5 mb-1">
+                    <div className={`w-7 h-7 rounded-md flex items-center justify-center ${
+                      plan.tier === 'basic' ? 'bg-white/[0.05]' :
+                      plan.tier === 'premium' ? 'bg-blue-500/10' :
+                      'bg-purple-500/10'
+                    }`}>
+                      {plan.tier === 'basic' && <Shield className="w-3.5 h-3.5 text-white/50" />}
+                      {plan.tier === 'premium' && <Zap className="w-3.5 h-3.5 text-blue-400" />}
+                      {plan.tier === 'premium_plus' && <Building2 className="w-3.5 h-3.5 text-purple-400" />}
                     </div>
-                    <div>
-                      <h3 className="text-xl font-bold text-white">{plan.name}</h3>
-                    </div>
+                    <h3 className="text-[15px] font-semibold text-white">{plan.name}</h3>
                   </div>
-                  <p className="text-sm text-gray-400 mb-5">{plan.tagline}</p>
+                  <p className="text-[13px] text-white/40 mb-5 pl-[38px]">{plan.tagline}</p>
 
                   {/* Price */}
-                  <div className="mb-6">
+                  <div className="mb-5">
                     {plan.price === 0 ? (
-                      <div className="flex items-baseline">
-                        <span className="text-4xl font-extrabold text-white">Free</span>
-                        <span className="ml-2 text-gray-500">forever</span>
+                      <div className="flex items-baseline gap-1">
+                        <span className="text-3xl font-bold text-white">₹0</span>
+                        <span className="text-sm text-white/30">/ month</span>
                       </div>
                     ) : (
                       <div>
-                        <div className="flex items-baseline">
-                          <span className="text-4xl font-extrabold text-white">₹{price}</span>
-                          <span className="ml-1.5 text-gray-500">/month</span>
+                        <div className="flex items-baseline gap-1">
+                          <span className="text-3xl font-bold text-white">₹{price}</span>
+                          <span className="text-sm text-white/30">/ month</span>
                         </div>
                         {billingCycle === 'yearly' && (
-                          <p className="text-xs text-gray-500 mt-1">Billed ₹{plan.yearlyPrice}/year</p>
+                          <p className="text-[12px] text-white/30 mt-1">₹{plan.yearlyPrice} billed annually</p>
                         )}
                       </div>
                     )}
                   </div>
 
-                  {/* Limits */}
-                  <div className="grid grid-cols-3 gap-2 mb-6 p-3 rounded-lg bg-slate-800/60 border border-gray-700/30">
-                    <div className="text-center">
-                      <p className="text-sm font-bold text-white">{plan.limits.repos}</p>
-                      <p className="text-[10px] text-gray-500 uppercase">Repos</p>
+                  {/* Limits row */}
+                  <div className="flex gap-4 mb-5 py-3 border-y border-white/[0.04]">
+                    <div>
+                      <p className="text-[13px] font-medium text-white">{plan.limits.repos}</p>
+                      <p className="text-[11px] text-white/30">repos</p>
                     </div>
-                    <div className="text-center border-x border-gray-700/30">
-                      <p className="text-sm font-bold text-white">{plan.limits.scans}</p>
-                      <p className="text-[10px] text-gray-500 uppercase">Scans/wk</p>
+                    <div>
+                      <p className="text-[13px] font-medium text-white">{plan.limits.scans}</p>
+                      <p className="text-[11px] text-white/30">scans/wk</p>
                     </div>
-                    <div className="text-center">
-                      <p className="text-sm font-bold text-white">{plan.limits.retention}</p>
-                      <p className="text-[10px] text-gray-500 uppercase">History</p>
+                    <div>
+                      <p className="text-[13px] font-medium text-white">{plan.limits.retention}</p>
+                      <p className="text-[11px] text-white/30">history</p>
                     </div>
                   </div>
 
@@ -284,52 +260,49 @@ export default function ChoosePlanPage() {
                   <button
                     onClick={() => handleSelectPlan(plan)}
                     disabled={processing}
-                    className={`w-full py-3 px-4 rounded-xl font-semibold text-white transition-all shadow-lg ${
-                      plan.popular 
-                        ? 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 shadow-blue-500/25' 
+                    className={`w-full py-2.5 px-4 rounded-lg text-[13px] font-medium transition-all flex items-center justify-center gap-2 disabled:opacity-50 ${
+                      plan.popular
+                        ? 'bg-blue-600 hover:bg-blue-500 text-white'
                         : plan.tier === 'premium_plus'
-                        ? 'bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 shadow-purple-500/20'
-                        : 'bg-gradient-to-r from-slate-600 to-slate-700 hover:from-slate-500 hover:to-slate-600 shadow-slate-500/10'
-                    } disabled:opacity-50`}
+                        ? 'bg-white/[0.08] hover:bg-white/[0.12] text-white border border-white/[0.08]'
+                        : 'bg-white/[0.05] hover:bg-white/[0.08] text-white/80 border border-white/[0.06]'
+                    }`}
                   >
-                    {plan.price === 0 ? 'Get Started Free' : `Choose ${plan.name}`}
-                    <ChevronRight className="inline-block w-4 h-4 ml-1" />
+                    {plan.price === 0 ? 'Start free' : `Get ${plan.name}`}
+                    <ArrowRight className="w-3.5 h-3.5" />
                   </button>
 
                   {/* Features */}
-                  <div className="mt-6 pt-6 border-t border-gray-700/30">
-                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">
-                      {plan.price === 0 ? 'Includes' : 'Everything in Starter, plus'}
-                    </p>
-                    <ul className="space-y-2.5">
-                      {plan.features.map((feature) => (
-                        <li key={feature} className="flex items-start gap-2.5">
-                          <Check className="w-4 h-4 text-emerald-400 mt-0.5 flex-shrink-0" />
-                          <span className="text-sm text-gray-300">{feature}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
+                  <ul className="mt-5 space-y-2">
+                    {plan.features.map((feature) => (
+                      <li key={feature} className="flex items-start gap-2">
+                        <Check className="w-3.5 h-3.5 text-emerald-400/70 mt-0.5 flex-shrink-0" />
+                        <span className="text-[13px] text-white/50">{feature}</span>
+                      </li>
+                    ))}
+                  </ul>
                 </div>
               </div>
             )
           })}
         </div>
 
-        {/* Skip link */}
-        <div className="text-center mt-8">
+        {/* Footer */}
+        <div className="mt-10 text-center space-y-3">
           <button
             onClick={() => {
               localStorage.removeItem('vs_new_user')
               router.push('/')
             }}
-            className="text-sm text-gray-500 hover:text-gray-400 underline underline-offset-4 transition-colors"
+            className="text-[13px] text-white/30 hover:text-white/50 transition-colors"
           >
-            Skip for now — I&apos;ll choose later
+            Skip for now
           </button>
+          <p className="text-[11px] text-white/20">
+            All plans include 256-bit encryption · Cancel anytime · No credit card for Starter
+          </p>
         </div>
       </div>
-
     </div>
   )
 }

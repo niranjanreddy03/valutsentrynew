@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { useSubscription, SubscriptionTier } from '@/contexts/SubscriptionContext'
 import { useAuth } from '@/contexts/AuthContext'
 import { useToast } from '@/contexts/ToastContext'
-import { Check, X, Sparkles } from 'lucide-react'
+import { Check, X, Zap, Building2, Shield, ArrowRight } from 'lucide-react'
 
 const FEATURE_LABELS: Record<string, string> = {
   slack_integration: 'Slack Integration',
@@ -64,7 +64,6 @@ export default function PricingPage() {
       return
     }
     if (tier === 'basic') {
-      // Free plan — just update profile directly
       setIsUpgrading(true)
       try {
         const success = await upgradeTier(tier)
@@ -79,7 +78,6 @@ export default function PricingPage() {
       }
       return
     }
-    // Paid plans — redirect to Razorpay checkout
     const params = new URLSearchParams({ plan: tier, cycle: billingCycle })
     router.push(`/checkout?${params.toString()}`)
   }
@@ -94,7 +92,6 @@ export default function PricingPage() {
     )
     if (!confirmed) return
     if (tier === 'basic') {
-      // Downgrading to free — just update profile
       setIsUpgrading(true)
       try {
         const success = await upgradeTier(tier)
@@ -108,7 +105,6 @@ export default function PricingPage() {
         setIsUpgrading(false)
       }
     } else {
-      // Switching to a different paid plan — go through checkout
       const params = new URLSearchParams({ plan: tier, cycle: billingCycle })
       router.push(`/checkout?${params.toString()}`)
     }
@@ -159,34 +155,47 @@ export default function PricingPage() {
   }
   const canUpgradeTo = (tier: string): boolean => getTierOrder(tier) > getTierOrder(currentTier)
 
+  const tierIcons: Record<string, typeof Shield> = {
+    basic: Shield,
+    premium: Zap,
+    premium_plus: Building2,
+  }
+
+  const tierIconColors: Record<string, string> = {
+    basic: 'bg-white/[0.05] text-white/50',
+    premium: 'bg-blue-500/10 text-blue-400',
+    premium_plus: 'bg-purple-500/10 text-purple-400',
+  }
+
   return (
-    <div className="min-h-screen bg-[var(--bg-primary)] py-12 px-4 sm:px-6 lg:px-8 text-[var(--text-primary)]">
-      <div className="max-w-7xl mx-auto">
+    <div className="min-h-screen bg-[#0a0a0f] py-16 px-4 sm:px-6 lg:px-8">
+      <div className="max-w-5xl mx-auto">
         {/* Header */}
-        <div className="text-center mb-12">
-          <div className="inline-flex items-center gap-2 rounded-full border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 py-1 text-xs text-[var(--text-muted)]">
-            <Sparkles className="w-3.5 h-3.5 text-[var(--accent)]" />
-            Simple, transparent pricing
+        <div className="text-center mb-14">
+          <div className="inline-flex items-center justify-center w-10 h-10 rounded-lg bg-white/[0.04] border border-white/[0.06] mb-6">
+            <Shield className="w-5 h-5 text-white/70" />
           </div>
-          <h1 className="mt-4 text-4xl font-extrabold sm:text-5xl">Choose Your Plan</h1>
-          <p className="mt-4 text-lg text-[var(--text-muted)]">
-            Secure your code with the right level of protection
+          <h1 className="text-3xl font-semibold text-white tracking-tight">Pricing</h1>
+          <p className="mt-3 text-[15px] text-white/50 max-w-md mx-auto">
+            Secure your code at any scale. Start free, upgrade when you need more.
           </p>
 
           {isAuthenticated && (
-            <div className="mt-6 flex flex-col items-center gap-3">
-              <span className="inline-flex items-center px-4 py-1.5 rounded-full text-sm font-medium border border-[var(--accent)]/40 bg-[var(--accent)]/10 text-[var(--accent)]">
-                Current Plan:{' '}
-                {currentTier === 'premium_plus'
-                  ? 'Premium Plus'
-                  : currentTier.charAt(0).toUpperCase() + currentTier.slice(1)}
-                {isTrialActive && ' (Trial)'}
+            <div className="mt-6 flex flex-col items-center gap-2">
+              <span className="inline-flex items-center px-3 py-1 rounded-full text-[12px] font-medium border border-white/[0.08] bg-white/[0.03] text-white/60">
+                Current plan:{' '}
+                <span className="ml-1 text-white">
+                  {currentTier === 'premium_plus'
+                    ? 'Premium Plus'
+                    : currentTier.charAt(0).toUpperCase() + currentTier.slice(1)}
+                </span>
+                {isTrialActive && <span className="ml-1 text-amber-400">(Trial)</span>}
               </span>
               {currentTier !== 'basic' && (
                 <button
                   onClick={handleCancel}
                   disabled={isUpgrading}
-                  className="text-sm font-medium text-red-400 hover:text-red-300 underline-offset-2 hover:underline disabled:opacity-50"
+                  className="text-[12px] text-red-400/60 hover:text-red-400 transition-colors disabled:opacity-50"
                 >
                   Cancel subscription
                 </button>
@@ -195,163 +204,144 @@ export default function PricingPage() {
           )}
 
           {/* Billing toggle */}
-          <div className="mt-8 flex items-center justify-center gap-4">
-            <span
-              className={`text-sm ${
+          <div className="mt-8 inline-flex items-center gap-3 bg-white/[0.03] border border-white/[0.06] rounded-full px-1.5 py-1.5">
+            <button
+              onClick={() => setBillingCycle('monthly')}
+              className={`px-4 py-1.5 rounded-full text-sm font-medium transition-all ${
                 billingCycle === 'monthly'
-                  ? 'text-[var(--text-primary)] font-semibold'
-                  : 'text-[var(--text-muted)]'
+                  ? 'bg-white/[0.08] text-white'
+                  : 'text-white/40 hover:text-white/60'
               }`}
             >
               Monthly
-            </span>
-            <button
-              onClick={() => setBillingCycle(billingCycle === 'monthly' ? 'yearly' : 'monthly')}
-              className="relative inline-flex h-6 w-11 items-center rounded-full transition-colors"
-              style={{
-                background:
-                  billingCycle === 'yearly' ? 'var(--accent)' : 'var(--bg-secondary)',
-                border: '1px solid var(--border-color)',
-              }}
-              aria-label="Toggle billing cycle"
-            >
-              <span
-                className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
-                  billingCycle === 'yearly' ? 'translate-x-6' : 'translate-x-1'
-                }`}
-              />
             </button>
-            <span
-              className={`text-sm ${
+            <button
+              onClick={() => setBillingCycle('yearly')}
+              className={`px-4 py-1.5 rounded-full text-sm font-medium transition-all ${
                 billingCycle === 'yearly'
-                  ? 'text-[var(--text-primary)] font-semibold'
-                  : 'text-[var(--text-muted)]'
+                  ? 'bg-white/[0.08] text-white'
+                  : 'text-white/40 hover:text-white/60'
               }`}
             >
               Yearly
-              <span className="ml-1 text-emerald-400">(Save 17%)</span>
-            </span>
+              <span className="ml-1.5 text-[11px] text-emerald-400 font-medium">−17%</span>
+            </button>
           </div>
         </div>
 
         {/* Pricing cards */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-8 max-w-6xl mx-auto">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 max-w-5xl mx-auto">
           {plans.map((plan) => {
             const isCurrentPlan = plan.tier === currentTier
             const canUpgrade = canUpgradeTo(plan.tier)
             const price = billingCycle === 'yearly' ? plan.price.yearly / 12 : plan.price.monthly
             const isPopular = plan.tier === 'premium'
+            const Icon = tierIcons[plan.tier] || Shield
+            const iconColor = tierIconColors[plan.tier] || ''
 
             return (
               <div
                 key={plan.id}
-                className="relative rounded-2xl transition-all"
-                style={{
-                  background: 'var(--card-bg)',
-                  border: isPopular
-                    ? '1px solid var(--accent)'
+                className={`relative rounded-xl transition-all duration-200 ${
+                  isPopular
+                    ? 'bg-white/[0.03] border border-blue-500/30'
                     : isCurrentPlan
-                    ? '1px solid rgb(16 185 129)'
-                    : '1px solid var(--border-color)',
-                  boxShadow: isPopular
-                    ? '0 0 0 4px color-mix(in srgb, var(--accent) 15%, transparent)'
-                    : 'none',
-                  transform: isPopular ? 'translateY(-4px)' : 'none',
-                }}
+                    ? 'bg-white/[0.02] border border-emerald-500/20'
+                    : 'bg-white/[0.015] border border-white/[0.06] hover:border-white/[0.1]'
+                }`}
               >
                 {isPopular && (
-                  <div className="absolute -top-3 left-1/2 -translate-x-1/2">
-                    <span
-                      className="px-3 py-1 rounded-full text-xs font-semibold text-white"
-                      style={{ background: 'var(--accent)' }}
-                    >
-                      Most Popular
+                  <div className="absolute -top-3 left-6">
+                    <span className="text-[11px] font-medium text-blue-400 bg-blue-500/10 border border-blue-500/20 px-2.5 py-0.5 rounded-full">
+                      Most popular
                     </span>
                   </div>
                 )}
                 {isCurrentPlan && !isPopular && (
-                  <div className="absolute -top-3 left-1/2 -translate-x-1/2">
-                    <span className="bg-emerald-500 text-white px-3 py-1 rounded-full text-xs font-semibold">
-                      Current Plan
+                  <div className="absolute -top-3 left-6">
+                    <span className="text-[11px] font-medium text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-0.5 rounded-full">
+                      Current plan
                     </span>
                   </div>
                 )}
 
-                <div className="p-8">
-                  <h3 className="text-2xl font-bold">{plan.name}</h3>
+                <div className="p-6">
+                  <div className="flex items-center gap-2.5 mb-4">
+                    <div className={`w-7 h-7 rounded-md flex items-center justify-center ${iconColor}`}>
+                      <Icon className="w-3.5 h-3.5" />
+                    </div>
+                    <h3 className="text-[15px] font-semibold text-white">{plan.name}</h3>
+                  </div>
 
                   {/* Price */}
-                  <div className="mt-4 flex items-baseline">
+                  <div className="mb-5">
                     {plan.price.monthly === 0 ? (
-                      <span className="text-5xl font-extrabold">Free</span>
+                      <div className="flex items-baseline gap-1">
+                        <span className="text-3xl font-bold text-white">₹0</span>
+                        <span className="text-sm text-white/30">/ month</span>
+                      </div>
                     ) : (
-                      <>
-                        <span className="text-5xl font-extrabold">{INR(Math.round(price))}</span>
-                        <span className="ml-1 text-xl text-[var(--text-muted)]">/mo</span>
-                      </>
+                      <div>
+                        <div className="flex items-baseline gap-1">
+                          <span className="text-3xl font-bold text-white">{INR(Math.round(price))}</span>
+                          <span className="text-sm text-white/30">/ mo</span>
+                        </div>
+                        {billingCycle === 'yearly' && plan.price.yearly > 0 && (
+                          <p className="text-[12px] text-white/30 mt-1">
+                            {INR(plan.price.yearly)} billed annually
+                          </p>
+                        )}
+                      </div>
                     )}
                   </div>
-                  {billingCycle === 'yearly' && plan.price.yearly > 0 && (
-                    <p className="mt-1 text-sm text-[var(--text-muted)]">
-                      Billed {INR(plan.price.yearly)}/year
-                    </p>
-                  )}
 
                   {/* Limits */}
-                  <div className="mt-6 space-y-2">
-                    <LimitRow
-                      text={`${plan.limits.max_repositories} Repositories`}
-                    />
-                    <LimitRow text={`${plan.limits.scans_per_week} Scans/Week`} />
-                    <LimitRow text={`${plan.limits.history_retention_days} Days History`} />
+                  <div className="flex gap-4 mb-5 py-3 border-y border-white/[0.04]">
+                    <div>
+                      <p className="text-[13px] font-medium text-white">{plan.limits.max_repositories}</p>
+                      <p className="text-[11px] text-white/30">repos</p>
+                    </div>
+                    <div>
+                      <p className="text-[13px] font-medium text-white">{plan.limits.scans_per_week}</p>
+                      <p className="text-[11px] text-white/30">scans/wk</p>
+                    </div>
+                    <div>
+                      <p className="text-[13px] font-medium text-white">{plan.limits.history_retention_days}d</p>
+                      <p className="text-[11px] text-white/30">history</p>
+                    </div>
                   </div>
 
                   {/* CTA */}
-                  <div className="mt-8">
+                  <div className="mb-5">
                     {isCurrentPlan ? (
                       <button
                         disabled
-                        className="w-full py-3 px-4 rounded-lg font-semibold cursor-not-allowed"
-                        style={{
-                          background: 'var(--bg-secondary)',
-                          color: 'var(--text-muted)',
-                          border: '1px solid var(--border-color)',
-                        }}
+                        className="w-full py-2.5 px-4 rounded-lg text-[13px] font-medium cursor-not-allowed bg-white/[0.03] text-white/30 border border-white/[0.04]"
                       >
-                        Current Plan
+                        Current plan
                       </button>
                     ) : canUpgrade ? (
                       <button
                         onClick={() => handleUpgrade(plan.tier as SubscriptionTier)}
                         disabled={isUpgrading}
-                        className="w-full py-3 px-4 rounded-lg font-semibold transition-colors text-white disabled:opacity-50 disabled:cursor-not-allowed"
-                        style={{
-                          background: isPopular
-                            ? 'var(--accent)'
+                        className={`w-full py-2.5 px-4 rounded-lg text-[13px] font-medium transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed ${
+                          isPopular
+                            ? 'bg-blue-600 hover:bg-blue-500 text-white'
                             : plan.tier === 'premium_plus'
-                            ? 'linear-gradient(135deg, var(--accent), #8b5cf6)'
-                            : 'var(--bg-secondary)',
-                          color: isPopular || plan.tier === 'premium_plus' ? 'white' : 'var(--text-primary)',
-                          border:
-                            isPopular || plan.tier === 'premium_plus'
-                              ? 'none'
-                              : '1px solid var(--border-color)',
-                        }}
+                            ? 'bg-white/[0.08] hover:bg-white/[0.12] text-white border border-white/[0.08]'
+                            : 'bg-white/[0.05] hover:bg-white/[0.08] text-white/80 border border-white/[0.06]'
+                        }`}
                       >
                         {isUpgrading ? 'Processing…' : `Upgrade to ${plan.name}`}
+                        {!isUpgrading && <ArrowRight className="w-3.5 h-3.5" />}
                       </button>
                     ) : (
                       <button
                         onClick={() => handleDowngrade(plan.tier as SubscriptionTier, plan.name)}
                         disabled={isUpgrading}
-                        className="w-full py-3 px-4 rounded-lg font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                        style={{
-                          background: 'var(--bg-secondary)',
-                          color: 'var(--text-primary)',
-                          border: '1px solid var(--border-color)',
-                        }}
+                        className="w-full py-2.5 px-4 rounded-lg text-[13px] font-medium transition-all bg-white/[0.05] hover:bg-white/[0.08] text-white/60 border border-white/[0.06] disabled:opacity-50"
                       >
-                        {isUpgrading ? 'Processing…' : `Downgrade to ${plan.name}`}
+                        {isUpgrading ? 'Processing…' : `Switch to ${plan.name}`}
                       </button>
                     )}
                   </div>
@@ -360,42 +350,28 @@ export default function PricingPage() {
                     <button
                       onClick={handleStartTrial}
                       disabled={isUpgrading}
-                      className="w-full mt-3 py-2 px-4 rounded-lg font-medium transition-colors disabled:opacity-50"
-                      style={{
-                        color: 'var(--accent)',
-                        border: '1px solid var(--accent)',
-                        background: 'transparent',
-                      }}
+                      className="w-full mb-5 py-2 px-4 rounded-lg text-[12px] font-medium transition-all text-purple-400/80 border border-purple-500/15 hover:border-purple-500/30 bg-transparent disabled:opacity-50"
                     >
-                      Start 14-Day Free Trial
+                      Start 14-day free trial
                     </button>
                   )}
 
                   {/* Features */}
-                  <div
-                    className="mt-8 pt-6 border-t"
-                    style={{ borderColor: 'var(--border-color)' }}
-                  >
-                    <h4 className="text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+                  <div className="pt-4 border-t border-white/[0.04]">
+                    <p className="text-[10px] font-medium text-white/25 uppercase tracking-wider mb-3">
                       Features
-                    </h4>
-                    <ul className="mt-4 space-y-3">
+                    </p>
+                    <ul className="space-y-2">
                       {HIGHLIGHTED_FEATURES.map((feature) => {
                         const hasFeature = plan.features[feature]
                         return (
-                          <li key={feature} className="flex items-center text-sm">
+                          <li key={feature} className="flex items-center gap-2 text-[13px]">
                             {hasFeature ? (
-                              <Check className="w-4 h-4 text-emerald-400 mr-2 shrink-0" />
+                              <Check className="w-3.5 h-3.5 text-emerald-400/70 shrink-0" />
                             ) : (
-                              <X className="w-4 h-4 text-[var(--text-muted)] opacity-40 mr-2 shrink-0" />
+                              <X className="w-3.5 h-3.5 text-white/15 shrink-0" />
                             )}
-                            <span
-                              className={
-                                hasFeature
-                                  ? 'text-[var(--text-primary)]'
-                                  : 'text-[var(--text-muted)] opacity-60'
-                              }
-                            >
+                            <span className={hasFeature ? 'text-white/50' : 'text-white/20'}>
                               {FEATURE_LABELS[feature]}
                             </span>
                           </li>
@@ -410,52 +386,42 @@ export default function PricingPage() {
         </div>
 
         {/* FAQ */}
-        <div className="mt-16 text-center">
-          <h2 className="text-2xl font-bold">Frequently Asked Questions</h2>
-          <div className="mt-8 max-w-3xl mx-auto space-y-6 text-left">
+        <div className="mt-20 max-w-2xl mx-auto">
+          <h2 className="text-lg font-semibold text-white text-center mb-6">Common questions</h2>
+          <div className="space-y-3">
             <FAQ
               q="Can I cancel anytime?"
-              a="Yes, you can cancel your subscription at any time. Your access will continue until the end of your billing period."
+              a="Yes. Cancel anytime from your account settings. Access continues through the end of your billing period."
             />
             <FAQ
               q="What happens when my trial ends?"
-              a="When your trial ends, you'll be automatically moved to the Basic plan unless you upgrade. Your data will be retained."
+              a="You'll move to the Starter plan automatically. No charge unless you upgrade. Your data stays."
             />
             <FAQ
-              q="Do you offer team or enterprise plans?"
-              a="Yes! Contact us for custom enterprise pricing with volume discounts, dedicated support, and custom features."
+              q="Do you offer enterprise plans?"
+              a="Yes — contact us for volume discounts, dedicated support, and custom feature development."
             />
             <FAQ
               q="Which currencies do you support?"
-              a="All plans are billed in Indian Rupees (INR). Contact us if you need billing in a different currency."
+              a="All plans are billed in INR. Contact us for invoicing in other currencies."
             />
           </div>
         </div>
-      </div>
-    </div>
-  )
-}
 
-function LimitRow({ text }: { text: string }) {
-  return (
-    <div className="flex items-center text-sm text-[var(--text-secondary)]">
-      <Check className="w-4 h-4 text-emerald-400 mr-2 shrink-0" />
-      <span>{text}</span>
+        {/* Footer */}
+        <p className="mt-12 text-center text-[11px] text-white/20">
+          All plans include 256-bit encryption · Prices shown exclude applicable taxes
+        </p>
+      </div>
     </div>
   )
 }
 
 function FAQ({ q, a }: { q: string; a: string }) {
   return (
-    <div
-      className="rounded-xl p-5"
-      style={{
-        background: 'var(--card-bg)',
-        border: '1px solid var(--border-color)',
-      }}
-    >
-      <h3 className="text-base font-semibold text-[var(--text-primary)]">{q}</h3>
-      <p className="mt-2 text-sm text-[var(--text-muted)]">{a}</p>
+    <div className="rounded-lg border border-white/[0.05] bg-white/[0.015] px-5 py-4">
+      <h3 className="text-[14px] font-medium text-white/80">{q}</h3>
+      <p className="mt-1.5 text-[13px] text-white/40 leading-relaxed">{a}</p>
     </div>
   )
 }
