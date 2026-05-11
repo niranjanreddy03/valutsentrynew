@@ -43,7 +43,10 @@ const CSP_DIRECTIVES = {
   'form-action': ["'self'"],
   'base-uri': ["'self'"],
   'object-src': ["'none'"],
-  'upgrade-insecure-requests': [],
+}
+
+if (isProd) {
+  CSP_DIRECTIVES['upgrade-insecure-requests'] = []
 }
 
 const csp = Object.entries(CSP_DIRECTIVES)
@@ -51,11 +54,6 @@ const csp = Object.entries(CSP_DIRECTIVES)
   .join('; ')
 
 const securityHeaders = [
-  // Force HTTPS for two years; eligible for the HSTS preload list.
-  {
-    key: 'Strict-Transport-Security',
-    value: 'max-age=63072000; includeSubDomains; preload',
-  },
   { key: 'Content-Security-Policy', value: csp },
   { key: 'X-Frame-Options', value: 'DENY' },
   { key: 'X-Content-Type-Options', value: 'nosniff' },
@@ -68,6 +66,14 @@ const securityHeaders = [
   { key: 'Cross-Origin-Resource-Policy', value: 'same-origin' },
   { key: 'X-DNS-Prefetch-Control', value: 'off' },
 ]
+
+if (isProd) {
+  // Force HTTPS for two years; eligible for the HSTS preload list.
+  securityHeaders.unshift({
+    key: 'Strict-Transport-Security',
+    value: 'max-age=63072000; includeSubDomains; preload',
+  })
+}
 
 const nextConfig = {
   reactStrictMode: true,
