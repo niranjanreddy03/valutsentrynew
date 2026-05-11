@@ -14,10 +14,12 @@ function normalizeAppOrigin(origin: string) {
 
 export function getAuthRedirectUrl(path = '/auth/callback') {
   const configuredUrl = process.env.NEXT_PUBLIC_SITE_URL?.trim().replace(/\/$/, '')
+  const productionFallbackUrl =
+    process.env.NODE_ENV === 'production' ? 'https://www.thevaultsentry.com' : ''
   const normalizedPath = path.startsWith('/') ? path : `/${path}`
 
-  if (configuredUrl) {
-    return `${normalizeAppOrigin(configuredUrl)}${normalizedPath}`
+  if (configuredUrl || productionFallbackUrl) {
+    return `${normalizeAppOrigin(configuredUrl || productionFallbackUrl)}${normalizedPath}`
   }
 
   if (typeof window !== 'undefined') {
