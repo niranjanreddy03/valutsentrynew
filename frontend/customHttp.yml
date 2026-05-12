@@ -1,0 +1,8 @@
+customHeaders:
+  - pattern: '**/*'
+    headers:
+      # Suppress technology fingerprinting
+      - key: 'X-Powered-By'
+        value: ''
+      - key: 'Server'
+        value: ''

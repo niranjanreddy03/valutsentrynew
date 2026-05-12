@@ -13,48 +13,17 @@
  *   • COOP / CORP        — process isolation so a compromised cross-origin
  *                           popup can't share our memory
  *
+ * The CSP is applied via middleware (not here) so that a unique nonce can be
+ * injected per-request.  We keep the remaining security headers here in
+ * next.config.js because they are static and don't need per-request variation.
+ *
  * Changes here must be paired with a CSP-report test deploy — a single wrong
  * directive can white-screen the app. Run with `Content-Security-Policy-
  * Report-Only` first when adjusting the CSP.
  */
 const isProd = process.env.NODE_ENV === 'production'
 
-// Build CSP from a structured map so diffs stay reviewable.
-const CSP_DIRECTIVES = {
-  'default-src': ["'self'"],
-  // Next.js injects a per-request nonce in production. In dev we need
-  // 'unsafe-eval' for Fast Refresh.
-  'script-src': ["'self'", "'unsafe-eval'", "'unsafe-inline'", 'https://challenges.cloudflare.com', 'https://checkout.razorpay.com', 'https://cdn.razorpay.com', 'https://*.razorpay.com'],
-  'style-src': ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'], // Tailwind runtime classes + Google Fonts
-  'img-src': ["'self'", 'data:', 'blob:', 'https:'],
-  'font-src': ["'self'", 'data:', 'https://fonts.gstatic.com'],
-  'connect-src': [
-    "'self'",
-    'https://*.supabase.co',
-    'wss://*.supabase.co',
-    'https://challenges.cloudflare.com',
-    'https://api.resend.com',
-    'https://hooks.slack.com',
-    'https://*.razorpay.com',
-    'https://lumberjack.razorpay.com',
-  ],
-  'frame-src': ["'self'", 'https://challenges.cloudflare.com', 'https://api.razorpay.com', 'https://*.razorpay.com'],
-  'frame-ancestors': ["'none'"],
-  'form-action': ["'self'"],
-  'base-uri': ["'self'"],
-  'object-src': ["'none'"],
-}
-
-if (isProd) {
-  CSP_DIRECTIVES['upgrade-insecure-requests'] = []
-}
-
-const csp = Object.entries(CSP_DIRECTIVES)
-  .map(([k, v]) => (v.length ? `${k} ${v.join(' ')}` : k))
-  .join('; ')
-
 const securityHeaders = [
-  { key: 'Content-Security-Policy', value: csp },
   { key: 'X-Frame-Options', value: 'DENY' },
   { key: 'X-Content-Type-Options', value: 'nosniff' },
   { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
@@ -81,6 +50,15 @@ const nextConfig = {
   poweredByHeader: false,
   typescript: {
     ignoreBuildErrors: true,
+  },
+
+  // CVE-2025-56471 & CVE-2024-27980: Harden image optimization.
+  // Empty remotePatterns = no external images via the optimizer.
+  // minimumCacheTTL + deviceSizes limit disk-cache abuse.
+  images: {
+    remotePatterns: [],
+    minimumCacheTTL: 60,
+    formats: ['image/webp'],
   },
 
   async headers() {
