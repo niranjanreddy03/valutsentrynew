@@ -56,12 +56,12 @@ const isProd = process.env.NODE_ENV === 'production'
  *   • Missing fallback directives added (worker-src, child-src, manifest-src)
  *   • `'unsafe-inline'` kept in style-src — required by Tailwind runtime
  */
-function buildCsp(nonce: string): string {
+function buildCsp(): string {
   const directives: Record<string, string[]> = {
     'default-src': ["'self'"],
     'script-src': [
       "'self'",
-      `'nonce-${nonce}'`,
+      "'unsafe-inline'",
       // In dev we need unsafe-eval for Fast Refresh / HMR.
       ...(!isProd ? ["'unsafe-eval'"] : []),
       'https://challenges.cloudflare.com',
@@ -215,20 +215,13 @@ async function looksHijacked(
 }
 
 export async function middleware(request: NextRequest) {
-  // ── 1. Generate a per-request CSP nonce ────────────────────────────
-  const nonceBytes = new Uint8Array(16)
-  crypto.getRandomValues(nonceBytes)
-  const nonce = Buffer.from(nonceBytes).toString('base64')
-
-  const cspHeader = buildCsp(nonce)
+  const cspHeader = buildCsp()
 
   // ── 2. Refresh the Supabase session ────────────────────────────────
   const response = await updateSession(request)
 
-  // ── 3. Inject CSP + nonce into the response ────────────────────────
+  // ── 3. Inject CSP into the response ────────────────────────────────
   response.headers.set('Content-Security-Policy', cspHeader)
-  // Next.js reads this header to set the nonce attribute on its own <script> tags.
-  response.headers.set('x-nonce', nonce)
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
