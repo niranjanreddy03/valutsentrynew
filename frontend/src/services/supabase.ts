@@ -17,6 +17,21 @@ export const supabase: ReturnType<typeof getSupabaseClient> = new Proxy(
     },
   },
 )
+
+async function requireSupabaseUserId(context: string): Promise<string> {
+  const supabase = getSupabaseClient()
+  const { data: { user }, error } = await supabase.auth.getUser()
+  if (error) {
+    console.error(`[${context}] Auth error:`, error.message)
+    throw new Error('Authentication failed. Please log in again.')
+  }
+  if (!user) {
+    console.error(`[${context}] User not authenticated`)
+    throw new Error('Not authenticated. Please log in again.')
+  }
+  return user.id
+}
+
 import type {
     Alert, ApiKey,
     InsertApiKey, InsertIntegration,
@@ -155,13 +170,19 @@ export const userService = {
 // =====================================================
 
 export const repositoryService = {
+  async requireCurrentUserId(): Promise<string> {
+    return requireSupabaseUserId('REPO SERVICE')
+  },
+
   async getAll(): Promise<Repository[]> {
     const supabase = getSupabaseClient()
-    console.log('[REPO SERVICE] Fetching all repositories')
+    const userId = await this.requireCurrentUserId()
+    console.log('[REPO SERVICE] Fetching repositories for user:', userId)
     
     const { data, error } = await supabase
       .from('repositories')
       .select('*')
+      .eq('user_id', userId)
       .order('created_at', { ascending: false })
 
     if (error) {
@@ -175,12 +196,14 @@ export const repositoryService = {
 
   async getById(id: number): Promise<Repository> {
     const supabase = getSupabaseClient()
+    const userId = await this.requireCurrentUserId()
     console.log('[REPO SERVICE] Fetching repository:', id)
     
     const { data, error } = await supabase
       .from('repositories')
       .select('*')
       .eq('id', id)
+      .eq('user_id', userId)
       .single()
 
     if (error) {
@@ -321,12 +344,14 @@ export const repositoryService = {
 
   async update(id: number, updates: UpdateRepository): Promise<Repository> {
     const supabase = getSupabaseClient()
+    const userId = await this.requireCurrentUserId()
     console.log('[REPO SERVICE] Updating repository:', id)
     const { data, error } = await supabase
       .from('repositories')
       // @ts-expect-error - Supabase type inference issue with @supabase/ssr
       .update(updates as UpdateRepository)
       .eq('id', id)
+      .eq('user_id', userId)
       .select()
       .single()
 
@@ -336,10 +361,12 @@ export const repositoryService = {
 
   async delete(id: number): Promise<void> {
     const supabase = getSupabaseClient()
+    const userId = await this.requireCurrentUserId()
     const { error } = await supabase
       .from('repositories')
       .delete()
       .eq('id', id)
+      .eq('user_id', userId)
 
     if (error) throw error
   },
@@ -359,6 +386,7 @@ export const repositoryService = {
       .from('repositories')
       .select('*')
       .eq('id', id)
+      .eq('user_id', user.id)
       .single()
 
     if (repoError || !repo) {
@@ -403,6 +431,7 @@ export const repositoryService = {
       // @ts-expect-error - Supabase type inference issue with @supabase/ssr
       .update({ last_scan_at: new Date().toISOString() } as UpdateRepository)
       .eq('id', id)
+      .eq('user_id', user.id)
 
     // Call backend API to trigger the actual scan with retry logic
     const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1'
@@ -473,12 +502,14 @@ export const repositoryService = {
 export const scanService = {
   async getAll(): Promise<(Scan & { repository_name?: string })[]> {
     const supabase = getSupabaseClient()
+    const userId = await requireSupabaseUserId('SCAN SERVICE')
     const { data, error } = await supabase
       .from('scans')
       .select(`
         *,
         repositories (name)
       `)
+      .eq('user_id', userId)
       .order('created_at', { ascending: false })
 
     if (error) throw error
@@ -490,10 +521,12 @@ export const scanService = {
 
   async getById(id: number): Promise<Scan> {
     const supabase = getSupabaseClient()
+    const userId = await requireSupabaseUserId('SCAN SERVICE')
     const { data, error } = await supabase
       .from('scans')
       .select('*')
       .eq('id', id)
+      .eq('user_id', userId)
       .single()
 
     if (error) throw error
@@ -502,10 +535,12 @@ export const scanService = {
 
   async getByScanId(scanId: string): Promise<Scan> {
     const supabase = getSupabaseClient()
+    const userId = await requireSupabaseUserId('SCAN SERVICE')
     const { data, error } = await supabase
       .from('scans')
       .select('*')
       .eq('scan_id', scanId)
+      .eq('user_id', userId)
       .single()
 
     if (error) throw error
@@ -514,10 +549,12 @@ export const scanService = {
 
   async getByRepository(repositoryId: number): Promise<Scan[]> {
     const supabase = getSupabaseClient()
+    const userId = await requireSupabaseUserId('SCAN SERVICE')
     const { data, error } = await supabase
       .from('scans')
       .select('*')
       .eq('repository_id', repositoryId)
+      .eq('user_id', userId)
       .order('created_at', { ascending: false })
 
     if (error) throw error
@@ -526,11 +563,13 @@ export const scanService = {
 
   async update(id: number, updates: UpdateScan): Promise<Scan> {
     const supabase = getSupabaseClient()
+    const userId = await requireSupabaseUserId('SCAN SERVICE')
     const { data, error } = await supabase
       .from('scans')
       // @ts-expect-error - Supabase type inference issue
       .update(updates as UpdateScan)
       .eq('id', id)
+      .eq('user_id', userId)
       .select()
       .single()
 
@@ -540,23 +579,27 @@ export const scanService = {
 
   async cancel(id: number): Promise<void> {
     const supabase = getSupabaseClient()
+    const userId = await requireSupabaseUserId('SCAN SERVICE')
     const { error } = await supabase
       .from('scans')
       // @ts-expect-error - Supabase type inference issue
       .update({ status: 'cancelled', completed_at: new Date().toISOString() } as UpdateScan)
       .eq('id', id)
+      .eq('user_id', userId)
 
     if (error) throw error
   },
 
   async getRecentScans(limit: number = 5): Promise<Scan[]> {
     const supabase = getSupabaseClient()
+    const userId = await requireSupabaseUserId('SCAN SERVICE')
     const { data, error } = await supabase
       .from('scans')
       .select(`
         *,
         repositories (name)
       `)
+      .eq('user_id', userId)
       .order('created_at', { ascending: false })
       .limit(limit)
 
@@ -575,12 +618,14 @@ export const scanService = {
 export const secretService = {
   async getAll(): Promise<(Secret & { repository_name?: string })[]> {
     const supabase = getSupabaseClient()
+    const userId = await requireSupabaseUserId('SECRET SERVICE')
     const { data, error } = await supabase
       .from('secrets')
       .select(`
         *,
         repositories (name)
       `)
+      .eq('user_id', userId)
       .order('created_at', { ascending: false })
 
     if (error) throw error
@@ -592,10 +637,12 @@ export const secretService = {
 
   async getById(id: number): Promise<Secret> {
     const supabase = getSupabaseClient()
+    const userId = await requireSupabaseUserId('SECRET SERVICE')
     const { data, error } = await supabase
       .from('secrets')
       .select('*')
       .eq('id', id)
+      .eq('user_id', userId)
       .single()
 
     if (error) throw error
@@ -604,10 +651,12 @@ export const secretService = {
 
   async getByScan(scanId: number): Promise<Secret[]> {
     const supabase = getSupabaseClient()
+    const userId = await requireSupabaseUserId('SECRET SERVICE')
     const { data, error } = await supabase
       .from('secrets')
       .select('*')
       .eq('scan_id', scanId)
+      .eq('user_id', userId)
       .order('risk_level', { ascending: true })
 
     if (error) throw error
@@ -616,10 +665,12 @@ export const secretService = {
 
   async getByRepository(repositoryId: number): Promise<Secret[]> {
     const supabase = getSupabaseClient()
+    const userId = await requireSupabaseUserId('SECRET SERVICE')
     const { data, error } = await supabase
       .from('secrets')
       .select('*')
       .eq('repository_id', repositoryId)
+      .eq('user_id', userId)
       .order('created_at', { ascending: false })
 
     if (error) throw error
@@ -629,6 +680,7 @@ export const secretService = {
   async updateStatus(id: number, status: Secret['status'], notes?: string): Promise<Secret> {
     const supabase = getSupabaseClient()
     const { data: { user } } = await supabase.auth.getUser()
+    if (!user) throw new Error('Not authenticated')
 
     const updates: UpdateSecret = {
       status,
@@ -645,6 +697,7 @@ export const secretService = {
       // @ts-expect-error - Supabase type inference issue
       .update(updates as UpdateSecret)
       .eq('id', id)
+      .eq('user_id', user.id)
       .select()
       .single()
 
@@ -654,12 +707,14 @@ export const secretService = {
 
   async getTopSecrets(limit: number = 5): Promise<Secret[]> {
     const supabase = getSupabaseClient()
+    const userId = await requireSupabaseUserId('SECRET SERVICE')
     const { data, error } = await supabase
       .from('secrets')
       .select(`
         *,
         repositories (name)
       `)
+      .eq('user_id', userId)
       .eq('status', 'active')
       .order('risk_level', { ascending: true }) // critical first
       .order('created_at', { ascending: false })
@@ -680,9 +735,11 @@ export const secretService = {
 export const alertService = {
   async getAll(): Promise<Alert[]> {
     const supabase = getSupabaseClient()
+    const userId = await requireSupabaseUserId('ALERT SERVICE')
     const { data, error } = await supabase
       .from('alerts')
       .select('*')
+      .eq('user_id', userId)
       .order('created_at', { ascending: false })
 
     if (error) throw error
@@ -691,9 +748,11 @@ export const alertService = {
 
   async getUnread(): Promise<Alert[]> {
     const supabase = getSupabaseClient()
+    const userId = await requireSupabaseUserId('ALERT SERVICE')
     const { data, error } = await supabase
       .from('alerts')
       .select('*')
+      .eq('user_id', userId)
       .eq('is_read', false)
       .eq('is_dismissed', false)
       .order('created_at', { ascending: false })
@@ -704,9 +763,11 @@ export const alertService = {
 
   async getUnreadCount(): Promise<number> {
     const supabase = getSupabaseClient()
+    const userId = await requireSupabaseUserId('ALERT SERVICE')
     const { count, error } = await supabase
       .from('alerts')
       .select('*', { count: 'exact', head: true })
+      .eq('user_id', userId)
       .eq('is_read', false)
       .eq('is_dismissed', false)
 
@@ -716,21 +777,25 @@ export const alertService = {
 
   async markAsRead(id: number): Promise<void> {
     const supabase = getSupabaseClient()
+    const userId = await requireSupabaseUserId('ALERT SERVICE')
     const { error } = await supabase
       .from('alerts')
       // @ts-expect-error - Supabase type inference issue
       .update({ is_read: true } as UpdateAlert)
       .eq('id', id)
+      .eq('user_id', userId)
 
     if (error) throw error
   },
 
   async markAllAsRead(): Promise<void> {
     const supabase = getSupabaseClient()
+    const userId = await requireSupabaseUserId('ALERT SERVICE')
     const { error } = await supabase
       .from('alerts')
       // @ts-expect-error - Supabase type inference issue
       .update({ is_read: true } as UpdateAlert)
+      .eq('user_id', userId)
       .eq('is_read', false)
 
     if (error) throw error
@@ -738,21 +803,25 @@ export const alertService = {
 
   async dismiss(id: number): Promise<void> {
     const supabase = getSupabaseClient()
+    const userId = await requireSupabaseUserId('ALERT SERVICE')
     const { error } = await supabase
       .from('alerts')
       // @ts-expect-error - Supabase type inference issue
       .update({ is_dismissed: true } as UpdateAlert)
       .eq('id', id)
+      .eq('user_id', userId)
 
     if (error) throw error
   },
 
   async delete(id: number): Promise<void> {
     const supabase = getSupabaseClient()
+    const userId = await requireSupabaseUserId('ALERT SERVICE')
     const { error } = await supabase
       .from('alerts')
       .delete()
       .eq('id', id)
+      .eq('user_id', userId)
 
     if (error) throw error
   },
@@ -777,15 +846,19 @@ export const dashboardService = {
       { count: scansThisWeek },
       { count: secretsResolved },
     ] = await Promise.all([
-      supabase.from('scans').select('*', { count: 'exact', head: true }),
-      supabase.from('secrets').select('*', { count: 'exact', head: true }),
-      supabase.from('secrets').select('*', { count: 'exact', head: true })
-        .in('risk_level', ['critical', 'high']).eq('status', 'active'),
-      supabase.from('repositories').select('*', { count: 'exact', head: true }),
       supabase.from('scans').select('*', { count: 'exact', head: true })
+        .eq('user_id', user.id),
+      supabase.from('secrets').select('*', { count: 'exact', head: true })
+        .eq('user_id', user.id),
+      supabase.from('secrets').select('*', { count: 'exact', head: true })
+        .eq('user_id', user.id).in('risk_level', ['critical', 'high']).eq('status', 'active'),
+      supabase.from('repositories').select('*', { count: 'exact', head: true })
+        .eq('user_id', user.id),
+      supabase.from('scans').select('*', { count: 'exact', head: true })
+        .eq('user_id', user.id)
         .gte('created_at', new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()),
       supabase.from('secrets').select('*', { count: 'exact', head: true })
-        .eq('status', 'resolved'),
+        .eq('user_id', user.id).eq('status', 'resolved'),
     ])
 
     return {
@@ -800,9 +873,11 @@ export const dashboardService = {
 
   async getRiskDistribution() {
     const supabase = getSupabaseClient()
+    const userId = await requireSupabaseUserId('DASHBOARD SERVICE')
     const { data, error } = await supabase
       .from('secrets')
       .select('risk_level')
+      .eq('user_id', userId)
       .eq('status', 'active')
 
     if (error) throw error
@@ -826,11 +901,13 @@ export const dashboardService = {
 
   async getScanActivity(days: number = 7) {
     const supabase = getSupabaseClient()
+    const userId = await requireSupabaseUserId('DASHBOARD SERVICE')
     const startDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000)
 
     const { data, error } = await supabase
       .from('scans')
       .select('created_at, secrets_found')
+      .eq('user_id', userId)
       .gte('created_at', startDate.toISOString())
       .order('created_at', { ascending: true })
 
@@ -881,9 +958,11 @@ export const apiKeyService = {
   async getAll(): Promise<ApiKey[]> {
     const supabase = getSupabaseClient()
     try {
+      const userId = await requireSupabaseUserId('API KEYS')
       const queryPromise = supabase
         .from('api_keys')
         .select('*')
+        .eq('user_id', userId)
         .order('created_at', { ascending: false })
 
       const timeoutPromise = new Promise<never>((_, reject) =>
@@ -1009,21 +1088,25 @@ export const apiKeyService = {
 
   async revoke(id: number): Promise<void> {
     const supabase = getSupabaseClient()
+    const userId = await requireSupabaseUserId('API KEYS')
     const { error } = await supabase
       .from('api_keys')
       // @ts-expect-error - Supabase type inference issue
       .update({ is_active: false } as UpdateApiKey)
       .eq('id', id)
+      .eq('user_id', userId)
 
     if (error) throw error
   },
 
   async delete(id: number): Promise<void> {
     const supabase = getSupabaseClient()
+    const userId = await requireSupabaseUserId('API KEYS')
     const { error } = await supabase
       .from('api_keys')
       .delete()
       .eq('id', id)
+      .eq('user_id', userId)
 
     if (error) throw error
   },
