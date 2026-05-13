@@ -23,6 +23,25 @@
  */
 const isProd = process.env.NODE_ENV === 'production'
 
+// Static fallback CSP for responses that bypass middleware (CDN error pages,
+// static asset 404s, etc.).  The middleware CSP (with per-request nonce) takes
+// precedence for all routes where middleware actually runs.
+const fallbackCsp = [
+  "default-src 'self'",
+  "script-src 'self' 'strict-dynamic'",
+  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+  "img-src 'self' data: blob:",
+  "font-src 'self' data: https://fonts.gstatic.com",
+  "connect-src 'self'",
+  "frame-src 'none'",
+  "frame-ancestors 'none'",
+  "form-action 'self'",
+  "base-uri 'self'",
+  "object-src 'none'",
+  "worker-src 'self'",
+  isProd ? 'upgrade-insecure-requests' : '',
+].filter(Boolean).join('; ')
+
 const securityHeaders = [
   { key: 'X-Frame-Options', value: 'DENY' },
   { key: 'X-Content-Type-Options', value: 'nosniff' },
@@ -34,6 +53,7 @@ const securityHeaders = [
   { key: 'Cross-Origin-Opener-Policy', value: 'same-origin' },
   { key: 'Cross-Origin-Resource-Policy', value: 'same-origin' },
   { key: 'X-DNS-Prefetch-Control', value: 'off' },
+  { key: 'Content-Security-Policy', value: fallbackCsp },
 ]
 
 if (isProd) {

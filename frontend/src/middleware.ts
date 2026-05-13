@@ -52,18 +52,34 @@ const isProd = process.env.NODE_ENV === 'production'
  * Key hardening vs. the previous CSP:
  *   • `'unsafe-eval'`   removed from script-src in production
  *   • `'unsafe-inline'` removed from script-src (nonce replaces it)
+ *   • `'strict-dynamic'` added so nonced bootstrap can load child chunks
  *   • Wildcard `*.razorpay.com` replaced with pinned subdomains
  *   • Missing fallback directives added (worker-src, child-src, manifest-src)
  *   • `'unsafe-inline'` kept in style-src — required by Tailwind runtime
+ *
+ * NOTE on 'strict-dynamic':
+ *   When present, the browser ignores host-based allowlist entries in
+ *   script-src (the https://... origins) and trusts only the nonce plus
+ *   any scripts loaded by already-trusted scripts.  This is the recommended
+ *   CSP Level 3 approach and is how Next.js's chunk-loading works:
+ *   the nonced bootstrap script dynamically loads page-specific chunks.
  */
-function buildCsp(): string {
+function buildCsp(nonce: string): string {
   const directives: Record<string, string[]> = {
     'default-src': ["'self'"],
     'script-src': [
       "'self'",
-      "'unsafe-inline'",
+      `'nonce-${nonce}'`,
+      // 'strict-dynamic' tells the browser: scripts loaded by a nonced
+      // script are implicitly trusted.  This is required for Next.js's
+      // dynamic chunk-loading and for the Razorpay <Script> component.
+      "'strict-dynamic'",
       // In dev we need unsafe-eval for Fast Refresh / HMR.
+      // unsafe-inline is NOT added — the nonce handles script allowlisting.
       ...(!isProd ? ["'unsafe-eval'"] : []),
+      // These host allowlists are kept for browsers that don't support
+      // CSP Level 3 / strict-dynamic (they'll be ignored by modern browsers
+      // when strict-dynamic is present, but serve as a fallback).
       'https://challenges.cloudflare.com',
       'https://checkout.razorpay.com',
       'https://cdn.razorpay.com',
@@ -143,9 +159,19 @@ async function fingerprint(input: string): Promise<string> {
     .join('')
 }
 
-export async function updateSession(request: NextRequest) {
+/**
+ * Refresh the Supabase session.
+ *
+ * Accepts `requestHeaders` so the nonce and CSP headers propagate through
+ * every `NextResponse.next()` call — this is critical for Next.js to
+ * auto-apply the nonce to its framework scripts.
+ */
+export async function updateSession(
+  request: NextRequest,
+  requestHeaders: Headers,
+) {
   let response = NextResponse.next({
-    request: { headers: request.headers },
+    request: { headers: requestHeaders },
   })
 
   const supabase = createServerClient(
@@ -159,13 +185,13 @@ export async function updateSession(request: NextRequest) {
         set(name: string, value: string, options: CookieOptions) {
           const hardened = hardenCookie(options)
           request.cookies.set({ name, value, ...hardened })
-          response = NextResponse.next({ request: { headers: request.headers } })
+          response = NextResponse.next({ request: { headers: requestHeaders } })
           response.cookies.set({ name, value, ...hardened })
         },
         remove(name: string, options: CookieOptions) {
           const hardened = hardenCookie(options)
           request.cookies.set({ name, value: '', ...hardened })
-          response = NextResponse.next({ request: { headers: request.headers } })
+          response = NextResponse.next({ request: { headers: requestHeaders } })
           response.cookies.set({ name, value: '', ...hardened })
         },
       },
@@ -215,13 +241,27 @@ async function looksHijacked(
 }
 
 export async function middleware(request: NextRequest) {
-  const cspHeader = buildCsp()
+  // ── 1. Generate a per-request cryptographic nonce ───────────────────
+  const nonce = Buffer.from(crypto.getRandomValues(new Uint8Array(16))).toString('base64')
+  const cspHeader = buildCsp(nonce)
+
+  // Clone request headers and inject nonce + CSP.
+  // Next.js reads the CSP from the *request* headers to discover the nonce
+  // and auto-apply it to all framework-generated <script> tags.
+  const requestHeaders = new Headers(request.headers)
+  requestHeaders.set('x-nonce', nonce)
+  requestHeaders.set('Content-Security-Policy', cspHeader)
 
   // ── 2. Refresh the Supabase session ────────────────────────────────
-  const response = await updateSession(request)
+  // Pass requestHeaders so the nonce survives through every
+  // NextResponse.next() call inside updateSession.
+  const response = await updateSession(request, requestHeaders)
 
-  // ── 3. Inject CSP into the response ────────────────────────────────
+  // ── 3. Inject CSP into the *response* headers ─────────────────────
+  // The request-header CSP tells Next.js which nonce to use at render time.
+  // The response-header CSP tells the browser what to enforce.
   response.headers.set('Content-Security-Policy', cspHeader)
+  response.headers.set('x-nonce', nonce)
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -245,6 +285,11 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+    /*
+     * Match ALL routes including _next/static so every response carries
+     * the CSP header.  We still exclude only image/font assets that
+     * don't benefit from CSP.
+     */
+    '/((?!_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
   ],
 }

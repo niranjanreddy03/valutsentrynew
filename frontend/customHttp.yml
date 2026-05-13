@@ -1,8 +1,44 @@
 customHeaders:
   - pattern: '**/*'
     headers:
-      # Suppress technology fingerprinting
+      # ── Technology fingerprinting suppression ──────────────────────
       - key: 'X-Powered-By'
         value: ''
       - key: 'Server'
         value: ''
+
+      # ── Clickjacking / UI redress ─────────────────────────────────
+      - key: 'X-Frame-Options'
+        value: 'DENY'
+
+      # ── MIME-type sniffing ────────────────────────────────────────
+      - key: 'X-Content-Type-Options'
+        value: 'nosniff'
+
+      # ── Referrer leak prevention ──────────────────────────────────
+      - key: 'Referrer-Policy'
+        value: 'strict-origin-when-cross-origin'
+
+      # ── Disable unused device APIs ────────────────────────────────
+      - key: 'Permissions-Policy'
+        value: 'camera=(), microphone=(), geolocation=(), interest-cohort=()'
+
+      # ── Process isolation ─────────────────────────────────────────
+      - key: 'Cross-Origin-Opener-Policy'
+        value: 'same-origin'
+      - key: 'Cross-Origin-Resource-Policy'
+        value: 'same-origin'
+
+      # ── Force HTTPS (2 years, preload-eligible) ───────────────────
+      - key: 'Strict-Transport-Security'
+        value: 'max-age=63072000; includeSubDomains; preload'
+
+      # ── DNS prefetch control ──────────────────────────────────────
+      - key: 'X-DNS-Prefetch-Control'
+        value: 'off'
+
+      # Static fallback CSP — the middleware injects a stricter per-request
+      # nonce-based CSP for all routes it handles.  This covers CDN error
+      # responses and static asset 404s that bypass Next.js entirely.
+      - key: 'Content-Security-Policy'
+        value: "default-src 'self'; script-src 'self' 'strict-dynamic'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob:; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self'; frame-src 'none'; frame-ancestors 'none'; form-action 'self'; base-uri 'self'; object-src 'none'; worker-src 'self'; upgrade-insecure-requests"
