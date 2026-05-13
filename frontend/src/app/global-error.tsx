@@ -1,5 +1,6 @@
 'use client'
 
+import * as Sentry from '@sentry/nextjs'
 import { AlertOctagon, RefreshCw } from 'lucide-react'
 import { useEffect } from 'react'
 
@@ -11,8 +12,7 @@ export default function GlobalError({
   reset: () => void
 }) {
   useEffect(() => {
-    // Log the error to an error reporting service
-    console.error('Global error:', error)
+    Sentry.captureException(error)
   }, [error])
 
   return (

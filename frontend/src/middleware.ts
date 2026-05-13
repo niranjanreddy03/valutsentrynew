@@ -84,6 +84,7 @@ function buildCsp(): string {
       'https://checkout.razorpay.com',
       'https://cdn.razorpay.com',
       'https://lumberjack.razorpay.com',
+      'https://*.ingest.de.sentry.io',
     ],
     'frame-src': [
       "'self'",
