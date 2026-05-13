@@ -49,29 +49,19 @@ const isProd = process.env.NODE_ENV === 'production'
 /**
  * Build CSP directives from a structured map so diffs stay reviewable.
  *
- * Key hardening vs. the original CSP:
- *   • `'unsafe-eval'`   removed from script-src in production
- *   • `'unsafe-inline'` removed from script-src in production (nonce replaces it)
- *   • Wildcard `*.razorpay.com` replaced with pinned subdomains
- *   • Missing fallback directives added (worker-src, child-src, manifest-src)
- *   • `'unsafe-inline'` kept in style-src — required by Tailwind runtime
+ * NOTE: Nonce-based CSP is not used because Amplify's serverless runtime
+ * does not propagate middleware request headers to the Next.js SSR
+ * renderer, so inline scripts are emitted without nonce attributes.
+ * CSP Level 2+ browsers ignore 'unsafe-inline' when a nonce is present,
+ * making the nonce counter-productive on this platform.
  *
- * The nonce is the primary mechanism: CSP Level 2+ browsers automatically
- * ignore 'unsafe-inline' when a nonce is present in script-src, so
- * production gets nonce-only enforcement without needing 'strict-dynamic'.
+ * Instead we use 'unsafe-inline' + explicit host allowlists.
  */
-function buildCsp(nonce: string): string {
+function buildCsp(): string {
   const directives: Record<string, string[]> = {
     'default-src': ["'self'"],
     'script-src': [
       "'self'",
-      `'nonce-${nonce}'`,
-      // Amplify's serverless runtime doesn't propagate the nonce to
-      // Next.js's SSR renderer, so inline scripts are emitted without
-      // nonce attributes. 'unsafe-inline' is required as a fallback.
-      // In CSP Level 2+ browsers 'unsafe-inline' is ignored when a
-      // nonce is present, so on platforms that DO propagate the nonce
-      // this has no effect.
       "'unsafe-inline'",
       ...(!isProd ? ["'unsafe-eval'"] : []),
       'https://challenges.cloudflare.com',
@@ -235,15 +225,10 @@ async function looksHijacked(
 }
 
 export async function middleware(request: NextRequest) {
-  // ── 1. Generate a per-request cryptographic nonce ───────────────────
-  const nonce = Buffer.from(crypto.getRandomValues(new Uint8Array(16))).toString('base64')
-  const cspHeader = buildCsp(nonce)
+  // ── 1. Build CSP header ────────────────────────────────────────────
+  const cspHeader = buildCsp()
 
-  // Clone request headers and inject nonce + CSP.
-  // Next.js reads the CSP from the *request* headers to discover the nonce
-  // and auto-apply it to all framework-generated <script> tags.
   const requestHeaders = new Headers(request.headers)
-  requestHeaders.set('x-nonce', nonce)
   requestHeaders.set('Content-Security-Policy', cspHeader)
 
   // ── 2. Refresh the Supabase session ────────────────────────────────
@@ -255,7 +240,6 @@ export async function middleware(request: NextRequest) {
   // The request-header CSP tells Next.js which nonce to use at render time.
   // The response-header CSP tells the browser what to enforce.
   response.headers.set('Content-Security-Policy', cspHeader)
-  response.headers.set('x-nonce', nonce)
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
