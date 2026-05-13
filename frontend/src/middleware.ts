@@ -49,20 +49,16 @@ const isProd = process.env.NODE_ENV === 'production'
 /**
  * Build CSP directives from a structured map so diffs stay reviewable.
  *
- * Key hardening vs. the previous CSP:
+ * Key hardening vs. the original CSP:
  *   • `'unsafe-eval'`   removed from script-src in production
- *   • `'unsafe-inline'` removed from script-src (nonce replaces it)
- *   • `'strict-dynamic'` added so nonced bootstrap can load child chunks
+ *   • `'unsafe-inline'` removed from script-src in production (nonce replaces it)
  *   • Wildcard `*.razorpay.com` replaced with pinned subdomains
  *   • Missing fallback directives added (worker-src, child-src, manifest-src)
  *   • `'unsafe-inline'` kept in style-src — required by Tailwind runtime
  *
- * NOTE on 'strict-dynamic':
- *   When present, the browser ignores host-based allowlist entries in
- *   script-src (the https://... origins) and trusts only the nonce plus
- *   any scripts loaded by already-trusted scripts.  This is the recommended
- *   CSP Level 3 approach and is how Next.js's chunk-loading works:
- *   the nonced bootstrap script dynamically loads page-specific chunks.
+ * The nonce is the primary mechanism: CSP Level 2+ browsers automatically
+ * ignore 'unsafe-inline' when a nonce is present in script-src, so
+ * production gets nonce-only enforcement without needing 'strict-dynamic'.
  */
 function buildCsp(nonce: string): string {
   const directives: Record<string, string[]> = {
@@ -70,16 +66,12 @@ function buildCsp(nonce: string): string {
     'script-src': [
       "'self'",
       `'nonce-${nonce}'`,
-      // 'strict-dynamic' tells the browser: scripts loaded by a nonced
-      // script are implicitly trusted.  This is required for Next.js's
-      // dynamic chunk-loading and for the Razorpay <Script> component.
-      "'strict-dynamic'",
-      // In dev we need unsafe-eval for Fast Refresh / HMR.
-      // unsafe-inline is NOT added — the nonce handles script allowlisting.
-      ...(!isProd ? ["'unsafe-eval'"] : []),
-      // These host allowlists are kept for browsers that don't support
-      // CSP Level 3 / strict-dynamic (they'll be ignored by modern browsers
-      // when strict-dynamic is present, but serve as a fallback).
+      // In dev we need unsafe-eval for Fast Refresh / HMR
+      // and unsafe-inline as a fallback for injected dev scripts.
+      // NOTE: In CSP Level 2+ browsers, 'unsafe-inline' is automatically
+      // ignored when a nonce is present — so it only helps as a fallback
+      // for very old browsers.
+      ...(!isProd ? ["'unsafe-eval'", "'unsafe-inline'"] : []),
       'https://challenges.cloudflare.com',
       'https://checkout.razorpay.com',
       'https://cdn.razorpay.com',

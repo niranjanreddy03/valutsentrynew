@@ -28,12 +28,12 @@ const isProd = process.env.NODE_ENV === 'production'
 // precedence for all routes where middleware actually runs.
 const fallbackCsp = [
   "default-src 'self'",
-  "script-src 'self' 'strict-dynamic'",
+  "script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com https://checkout.razorpay.com https://cdn.razorpay.com https://api.razorpay.com",
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
   "img-src 'self' data: blob:",
   "font-src 'self' data: https://fonts.gstatic.com",
-  "connect-src 'self'",
-  "frame-src 'none'",
+  "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.razorpay.com https://checkout.razorpay.com",
+  "frame-src 'self' https://challenges.cloudflare.com https://api.razorpay.com https://checkout.razorpay.com",
   "frame-ancestors 'none'",
   "form-action 'self'",
   "base-uri 'self'",
