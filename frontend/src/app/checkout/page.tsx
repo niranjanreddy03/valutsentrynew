@@ -1,9 +1,10 @@
 'use client'
 
-import { useEffect, useMemo, useState, Suspense } from 'react'
+import { useEffect, useMemo, useState, useCallback, Suspense } from 'react'
 import Script from 'next/script'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
+import Select from 'react-select'
 import {
   ArrowLeft,
   Check,
@@ -25,6 +26,11 @@ interface PaidPlan {
   name: string
   tagline: string
   highlights: string[]
+}
+
+interface SelectOption {
+  value: string
+  label: string
 }
 
 const PAID_PLANS: Record<PaidTier, PaidPlan> = {
@@ -76,6 +82,51 @@ interface RazorpayOptions {
   modal?: { ondismiss?: () => void }
 }
 
+const selectStyles = {
+  control: (base: any, state: any) => ({
+    ...base,
+    background: 'rgba(255,255,255,0.04)',
+    borderColor: state.isFocused ? 'rgba(255,255,255,0.15)' : 'rgba(255,255,255,0.08)',
+    borderRadius: '0.5rem',
+    padding: '0px 2px',
+    fontSize: '13px',
+    minHeight: '38px',
+    boxShadow: 'none',
+    '&:hover': { borderColor: 'rgba(255,255,255,0.12)' },
+  }),
+  menu: (base: any) => ({
+    ...base,
+    background: '#1a1a24',
+    border: '1px solid rgba(255,255,255,0.08)',
+    borderRadius: '0.5rem',
+    zIndex: 50,
+  }),
+  option: (base: any, state: any) => ({
+    ...base,
+    background: state.isFocused ? 'rgba(255,255,255,0.06)' : 'transparent',
+    color: state.isSelected ? '#fff' : 'rgba(255,255,255,0.7)',
+    fontSize: '13px',
+    padding: '8px 12px',
+    cursor: 'pointer',
+    '&:active': { background: 'rgba(255,255,255,0.1)' },
+  }),
+  singleValue: (base: any) => ({ ...base, color: '#fff', fontSize: '13px' }),
+  input: (base: any) => ({ ...base, color: '#fff', fontSize: '13px' }),
+  placeholder: (base: any) => ({ ...base, color: 'rgba(255,255,255,0.2)', fontSize: '13px' }),
+  indicatorSeparator: () => ({ display: 'none' }),
+  dropdownIndicator: (base: any) => ({ ...base, color: 'rgba(255,255,255,0.2)', padding: '0 6px' }),
+  noOptionsMessage: (base: any) => ({ ...base, color: 'rgba(255,255,255,0.3)', fontSize: '13px' }),
+  loadingMessage: (base: any) => ({ ...base, color: 'rgba(255,255,255,0.3)', fontSize: '13px' }),
+}
+
+const selectErrorStyles = {
+  ...selectStyles,
+  control: (base: any, state: any) => ({
+    ...selectStyles.control(base, state),
+    borderColor: state.isFocused ? 'rgba(239,68,68,0.7)' : 'rgba(239,68,68,0.5)',
+  }),
+}
+
 function CheckoutInner() {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -91,16 +142,126 @@ function CheckoutInner() {
   const [processing, setProcessing] = useState(false)
   const [success, setSuccess] = useState(false)
   const [quote, setQuote] = useState<{ amountMajor: number; currency: string } | null>(null)
-  const [billing, setBilling] = useState({
-    fullName: '',
-    address: '',
-    city: '',
-    state: '',
-    zip: '',
-    country: 'India',
-  })
   const [quoteError, setQuoteError] = useState(false)
   const [billingErrors, setBillingErrors] = useState<Record<string, string>>({})
+
+  // Billing fields
+  const [fullName, setFullName] = useState('')
+  const [address, setAddress] = useState('')
+  const [zip, setZip] = useState('')
+
+  // Location dropdowns
+  const [countries, setCountries] = useState<SelectOption[]>([])
+  const [states, setStates] = useState<SelectOption[]>([])
+  const [cities, setCities] = useState<SelectOption[]>([])
+  const [selectedCountry, setSelectedCountry] = useState<SelectOption | null>(null)
+  const [selectedState, setSelectedState] = useState<SelectOption | null>(null)
+  const [selectedCity, setSelectedCity] = useState<SelectOption | null>(null)
+  const [loadingStates, setLoadingStates] = useState(false)
+  const [loadingCities, setLoadingCities] = useState(false)
+
+  // Fetch countries from REST Countries API on mount
+  useEffect(() => {
+    fetch('https://restcountries.com/v3.1/all?fields=name')
+      .then((r) => r.json())
+      .then((data: { name: { common: string } }[]) => {
+        const sorted = data
+          .map((c) => ({ value: c.name.common, label: c.name.common }))
+          .sort((a, b) => a.label.localeCompare(b.label))
+        setCountries(sorted)
+        const india = sorted.find((c) => c.value === 'India')
+        if (india) {
+          setSelectedCountry(india)
+        }
+      })
+      .catch(() => {
+        setCountries([
+          { value: 'India', label: 'India' },
+          { value: 'United States', label: 'United States' },
+          { value: 'United Kingdom', label: 'United Kingdom' },
+          { value: 'Canada', label: 'Canada' },
+          { value: 'Australia', label: 'Australia' },
+          { value: 'Germany', label: 'Germany' },
+          { value: 'Singapore', label: 'Singapore' },
+        ])
+        setSelectedCountry({ value: 'India', label: 'India' })
+      })
+  }, [])
+
+  // Fetch states when country changes
+  useEffect(() => {
+    if (!selectedCountry) {
+      setStates([])
+      setSelectedState(null)
+      setCities([])
+      setSelectedCity(null)
+      return
+    }
+    setLoadingStates(true)
+    setSelectedState(null)
+    setCities([])
+    setSelectedCity(null)
+
+    fetch('https://countriesnow.space/api/v0.1/countries/states', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ country: selectedCountry.value }),
+    })
+      .then((r) => r.json())
+      .then((data) => {
+        if (!data.error && data.data?.states) {
+          setStates(
+            data.data.states
+              .map((s: { name: string }) => ({ value: s.name, label: s.name }))
+              .sort((a: SelectOption, b: SelectOption) => a.label.localeCompare(b.label))
+          )
+        } else {
+          setStates([])
+        }
+      })
+      .catch(() => setStates([]))
+      .finally(() => setLoadingStates(false))
+  }, [selectedCountry])
+
+  // Fetch cities when state changes
+  useEffect(() => {
+    if (!selectedCountry || !selectedState) {
+      setCities([])
+      setSelectedCity(null)
+      return
+    }
+    setLoadingCities(true)
+    setSelectedCity(null)
+
+    fetch('https://countriesnow.space/api/v0.1/countries/state/cities', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ country: selectedCountry.value, state: selectedState.value }),
+    })
+      .then((r) => r.json())
+      .then((data) => {
+        if (!data.error && data.data?.length) {
+          setCities(
+            data.data
+              .map((c: string) => ({ value: c, label: c }))
+              .sort((a: SelectOption, b: SelectOption) => a.label.localeCompare(b.label))
+          )
+        } else {
+          setCities([])
+        }
+      })
+      .catch(() => setCities([]))
+      .finally(() => setLoadingCities(false))
+  }, [selectedCountry, selectedState])
+
+  const billing = useMemo(() => ({
+    fullName,
+    address,
+    city: selectedCity?.value || '',
+    state: selectedState?.value || '',
+    zip,
+    country: selectedCountry?.value || '',
+  }), [fullName, address, selectedCity, selectedState, zip, selectedCountry])
 
   useEffect(() => {
     if (!plan) router.replace('/choose-plan')
@@ -141,16 +302,17 @@ function CheckoutInner() {
     return `${symbol}${quote.amountMajor.toLocaleString()}`
   }, [quote])
 
-  const validateBilling = (): boolean => {
+  const validateBilling = useCallback((): boolean => {
     const errors: Record<string, string> = {}
-    if (!billing.fullName.trim()) errors.fullName = 'Full name is required'
-    if (!billing.address.trim()) errors.address = 'Street address is required'
-    if (!billing.city.trim()) errors.city = 'City is required'
-    if (!billing.state.trim()) errors.state = 'State is required'
-    if (!billing.zip.trim()) errors.zip = 'ZIP code is required'
+    if (!fullName.trim()) errors.fullName = 'Full name is required'
+    if (!address.trim()) errors.address = 'Street address is required'
+    if (!selectedCountry) errors.country = 'Country is required'
+    if (!selectedState) errors.state = 'State is required'
+    if (!selectedCity && cities.length > 0) errors.city = 'City is required'
+    if (!zip.trim()) errors.zip = 'ZIP code is required'
     setBillingErrors(errors)
     return Object.keys(errors).length === 0
-  }
+  }, [fullName, address, selectedCountry, selectedState, selectedCity, cities.length, zip])
 
   const handlePay = async () => {
     if (!plan) return
@@ -350,80 +512,100 @@ function CheckoutInner() {
                     Required for your invoice.
                   </p>
                   <div className="space-y-3">
+                    {/* Full name */}
                     <div>
                       <label className="block text-[12px] text-white/40 mb-1">Full name <span className="text-red-400">*</span></label>
                       <input
                         type="text"
-                        value={billing.fullName}
-                        onChange={(e) => { setBilling({ ...billing, fullName: e.target.value }); setBillingErrors((p) => ({ ...p, fullName: '' })) }}
+                        value={fullName}
+                        onChange={(e) => { setFullName(e.target.value); setBillingErrors((p) => ({ ...p, fullName: '' })) }}
                         placeholder={user?.full_name || 'John Doe'}
                         className={`w-full px-3 py-2 rounded-lg bg-white/[0.04] border text-[13px] text-white placeholder:text-white/20 focus:outline-none transition-colors ${billingErrors.fullName ? 'border-red-500/50 focus:border-red-500/70' : 'border-white/[0.08] focus:border-white/[0.15]'}`}
                       />
                       {billingErrors.fullName && <p className="text-[11px] text-red-400 mt-1">{billingErrors.fullName}</p>}
                     </div>
+
+                    {/* Street address */}
                     <div>
                       <label className="block text-[12px] text-white/40 mb-1">Street address <span className="text-red-400">*</span></label>
                       <input
                         type="text"
-                        value={billing.address}
-                        onChange={(e) => { setBilling({ ...billing, address: e.target.value }); setBillingErrors((p) => ({ ...p, address: '' })) }}
+                        value={address}
+                        onChange={(e) => { setAddress(e.target.value); setBillingErrors((p) => ({ ...p, address: '' })) }}
                         placeholder="123 Main St, Apt 4"
                         className={`w-full px-3 py-2 rounded-lg bg-white/[0.04] border text-[13px] text-white placeholder:text-white/20 focus:outline-none transition-colors ${billingErrors.address ? 'border-red-500/50 focus:border-red-500/70' : 'border-white/[0.08] focus:border-white/[0.15]'}`}
                       />
                       {billingErrors.address && <p className="text-[11px] text-red-400 mt-1">{billingErrors.address}</p>}
                     </div>
+
+                    {/* Country */}
+                    <div>
+                      <label className="block text-[12px] text-white/40 mb-1">Country <span className="text-red-400">*</span></label>
+                      <Select<SelectOption>
+                        options={countries}
+                        value={selectedCountry}
+                        onChange={(opt) => { setSelectedCountry(opt); setBillingErrors((p) => ({ ...p, country: '' })) }}
+                        placeholder="Select country..."
+                        isSearchable
+                        styles={billingErrors.country ? selectErrorStyles : selectStyles}
+                        classNamePrefix="rs"
+                      />
+                      {billingErrors.country && <p className="text-[11px] text-red-400 mt-1">{billingErrors.country}</p>}
+                    </div>
+
+                    {/* State & City */}
                     <div className="grid grid-cols-2 gap-3">
                       <div>
-                        <label className="block text-[12px] text-white/40 mb-1">City <span className="text-red-400">*</span></label>
-                        <input
-                          type="text"
-                          value={billing.city}
-                          onChange={(e) => { setBilling({ ...billing, city: e.target.value }); setBillingErrors((p) => ({ ...p, city: '' })) }}
-                          placeholder="Hyderabad"
-                          className={`w-full px-3 py-2 rounded-lg bg-white/[0.04] border text-[13px] text-white placeholder:text-white/20 focus:outline-none transition-colors ${billingErrors.city ? 'border-red-500/50 focus:border-red-500/70' : 'border-white/[0.08] focus:border-white/[0.15]'}`}
-                        />
-                        {billingErrors.city && <p className="text-[11px] text-red-400 mt-1">{billingErrors.city}</p>}
-                      </div>
-                      <div>
                         <label className="block text-[12px] text-white/40 mb-1">State <span className="text-red-400">*</span></label>
-                        <input
-                          type="text"
-                          value={billing.state}
-                          onChange={(e) => { setBilling({ ...billing, state: e.target.value }); setBillingErrors((p) => ({ ...p, state: '' })) }}
-                          placeholder="Telangana"
-                          className={`w-full px-3 py-2 rounded-lg bg-white/[0.04] border text-[13px] text-white placeholder:text-white/20 focus:outline-none transition-colors ${billingErrors.state ? 'border-red-500/50 focus:border-red-500/70' : 'border-white/[0.08] focus:border-white/[0.15]'}`}
+                        <Select<SelectOption>
+                          options={states}
+                          value={selectedState}
+                          onChange={(opt) => { setSelectedState(opt); setBillingErrors((p) => ({ ...p, state: '' })) }}
+                          placeholder={loadingStates ? 'Loading...' : 'Select state...'}
+                          isSearchable
+                          isLoading={loadingStates}
+                          isDisabled={!selectedCountry || loadingStates}
+                          noOptionsMessage={() => selectedCountry ? 'No states found' : 'Select a country first'}
+                          styles={billingErrors.state ? selectErrorStyles : selectStyles}
+                          classNamePrefix="rs"
                         />
                         {billingErrors.state && <p className="text-[11px] text-red-400 mt-1">{billingErrors.state}</p>}
                       </div>
-                    </div>
-                    <div className="grid grid-cols-2 gap-3">
                       <div>
-                        <label className="block text-[12px] text-white/40 mb-1">ZIP / Postal code <span className="text-red-400">*</span></label>
-                        <input
-                          type="text"
-                          value={billing.zip}
-                          onChange={(e) => { setBilling({ ...billing, zip: e.target.value }); setBillingErrors((p) => ({ ...p, zip: '' })) }}
-                          placeholder="500001"
-                          className={`w-full px-3 py-2 rounded-lg bg-white/[0.04] border text-[13px] text-white placeholder:text-white/20 focus:outline-none transition-colors ${billingErrors.zip ? 'border-red-500/50 focus:border-red-500/70' : 'border-white/[0.08] focus:border-white/[0.15]'}`}
+                        <label className="block text-[12px] text-white/40 mb-1">City {cities.length > 0 && <span className="text-red-400">*</span>}</label>
+                        <Select<SelectOption>
+                          options={cities}
+                          value={selectedCity}
+                          onChange={(opt) => { setSelectedCity(opt); setBillingErrors((p) => ({ ...p, city: '' })) }}
+                          placeholder={loadingCities ? 'Loading...' : cities.length === 0 && selectedState ? 'Type city' : 'Select city...'}
+                          isSearchable
+                          isLoading={loadingCities}
+                          isDisabled={!selectedState || loadingCities}
+                          noOptionsMessage={() => selectedState ? 'No cities found — type manually' : 'Select a state first'}
+                          styles={billingErrors.city ? selectErrorStyles : selectStyles}
+                          classNamePrefix="rs"
+                          isClearable
+                          onInputChange={(val, { action }) => {
+                            if (action === 'input-change' && val && cities.length === 0) {
+                              setSelectedCity({ value: val, label: val })
+                            }
+                          }}
                         />
-                        {billingErrors.zip && <p className="text-[11px] text-red-400 mt-1">{billingErrors.zip}</p>}
+                        {billingErrors.city && <p className="text-[11px] text-red-400 mt-1">{billingErrors.city}</p>}
                       </div>
-                      <div>
-                        <label className="block text-[12px] text-white/40 mb-1">Country <span className="text-red-400">*</span></label>
-                        <select
-                          value={billing.country}
-                          onChange={(e) => setBilling({ ...billing, country: e.target.value })}
-                          className="w-full px-3 py-2 rounded-lg bg-white/[0.04] border border-white/[0.08] text-[13px] text-white focus:outline-none focus:border-white/[0.15] transition-colors"
-                        >
-                          <option value="India">India</option>
-                          <option value="United States">United States</option>
-                          <option value="United Kingdom">United Kingdom</option>
-                          <option value="Canada">Canada</option>
-                          <option value="Australia">Australia</option>
-                          <option value="Germany">Germany</option>
-                          <option value="Singapore">Singapore</option>
-                        </select>
-                      </div>
+                    </div>
+
+                    {/* ZIP */}
+                    <div className="max-w-[50%]">
+                      <label className="block text-[12px] text-white/40 mb-1">ZIP / Postal code <span className="text-red-400">*</span></label>
+                      <input
+                        type="text"
+                        value={zip}
+                        onChange={(e) => { setZip(e.target.value); setBillingErrors((p) => ({ ...p, zip: '' })) }}
+                        placeholder="500001"
+                        className={`w-full px-3 py-2 rounded-lg bg-white/[0.04] border text-[13px] text-white placeholder:text-white/20 focus:outline-none transition-colors ${billingErrors.zip ? 'border-red-500/50 focus:border-red-500/70' : 'border-white/[0.08] focus:border-white/[0.15]'}`}
+                      />
+                      {billingErrors.zip && <p className="text-[11px] text-red-400 mt-1">{billingErrors.zip}</p>}
                     </div>
                   </div>
                 </div>

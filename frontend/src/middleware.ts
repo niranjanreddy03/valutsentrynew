@@ -85,6 +85,8 @@ function buildCsp(): string {
       'https://cdn.razorpay.com',
       'https://lumberjack.razorpay.com',
       'https://*.ingest.de.sentry.io',
+      'https://restcountries.com',
+      'https://countriesnow.space',
     ],
     'frame-src': [
       "'self'",

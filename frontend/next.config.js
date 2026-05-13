@@ -34,7 +34,7 @@ const fallbackCsp = [
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
   "img-src 'self' data: blob:",
   "font-src 'self' data: https://fonts.gstatic.com",
-  "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.razorpay.com https://checkout.razorpay.com https://*.ingest.de.sentry.io",
+  "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.razorpay.com https://checkout.razorpay.com https://*.ingest.de.sentry.io https://restcountries.com https://countriesnow.space",
   "frame-src 'self' https://challenges.cloudflare.com https://api.razorpay.com https://checkout.razorpay.com",
   "frame-ancestors 'none'",
   "form-action 'self'",
