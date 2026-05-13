@@ -66,12 +66,14 @@ function buildCsp(nonce: string): string {
     'script-src': [
       "'self'",
       `'nonce-${nonce}'`,
-      // In dev we need unsafe-eval for Fast Refresh / HMR
-      // and unsafe-inline as a fallback for injected dev scripts.
-      // NOTE: In CSP Level 2+ browsers, 'unsafe-inline' is automatically
-      // ignored when a nonce is present — so it only helps as a fallback
-      // for very old browsers.
-      ...(!isProd ? ["'unsafe-eval'", "'unsafe-inline'"] : []),
+      // Amplify's serverless runtime doesn't propagate the nonce to
+      // Next.js's SSR renderer, so inline scripts are emitted without
+      // nonce attributes. 'unsafe-inline' is required as a fallback.
+      // In CSP Level 2+ browsers 'unsafe-inline' is ignored when a
+      // nonce is present, so on platforms that DO propagate the nonce
+      // this has no effect.
+      "'unsafe-inline'",
+      ...(!isProd ? ["'unsafe-eval'"] : []),
       'https://challenges.cloudflare.com',
       'https://checkout.razorpay.com',
       'https://cdn.razorpay.com',
