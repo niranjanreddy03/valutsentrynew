@@ -12,7 +12,6 @@ import {
   Loader2,
   Crown,
   Zap,
-  ChevronRight,
 } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 import { useToast } from '@/contexts/ToastContext'
@@ -101,7 +100,7 @@ function CheckoutInner() {
     country: 'India',
   })
   const [quoteError, setQuoteError] = useState(false)
-  const [showBilling, setShowBilling] = useState(false)
+  const [billingErrors, setBillingErrors] = useState<Record<string, string>>({})
 
   useEffect(() => {
     if (!plan) router.replace('/choose-plan')
@@ -142,8 +141,23 @@ function CheckoutInner() {
     return `${symbol}${quote.amountMajor.toLocaleString()}`
   }, [quote])
 
+  const validateBilling = (): boolean => {
+    const errors: Record<string, string> = {}
+    if (!billing.fullName.trim()) errors.fullName = 'Full name is required'
+    if (!billing.address.trim()) errors.address = 'Street address is required'
+    if (!billing.city.trim()) errors.city = 'City is required'
+    if (!billing.state.trim()) errors.state = 'State is required'
+    if (!billing.zip.trim()) errors.zip = 'ZIP code is required'
+    setBillingErrors(errors)
+    return Object.keys(errors).length === 0
+  }
+
   const handlePay = async () => {
     if (!plan) return
+    if (!validateBilling()) {
+      toast.error('Missing billing details', 'Please fill in all billing address fields.')
+      return
+    }
     if (!window.Razorpay) {
       toast.error('Payment unavailable', 'Checkout script failed to load.')
       return
@@ -191,6 +205,7 @@ function CheckoutInner() {
                 ...response,
                 tier: plan.tier,
                 cycle: cycleParam,
+                billing,
               }),
             })
             if (!verifyRes.ok) {
@@ -326,100 +341,91 @@ function CheckoutInner() {
                   </div>
                 </div>
 
-                {/* Billing Address — collapsible, optional */}
+                {/* Billing Address — required */}
                 <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-6">
-                  <button
-                    type="button"
-                    onClick={() => setShowBilling((v) => !v)}
-                    className="w-full flex items-center justify-between"
-                  >
-                    <div className="flex items-center gap-2">
-                      <p className="text-[11px] font-medium text-white/30 uppercase tracking-wider">
-                        Billing address
-                      </p>
-                      <span className="text-[10px] text-white/20 font-normal normal-case px-1.5 py-0.5 rounded bg-white/[0.04]">
-                        Optional
-                      </span>
-                    </div>
-                    <ChevronRight className={`w-3.5 h-3.5 text-white/20 transition-transform ${showBilling ? 'rotate-90' : ''}`} />
-                  </button>
-                  <p className="text-[12px] text-white/25 mt-1.5">
-                    Only needed if you require a billing address on your invoice.
+                  <p className="text-[11px] font-medium text-white/30 uppercase tracking-wider mb-1">
+                    Billing address
                   </p>
-                  {showBilling && (
-                    <div className="space-y-3 mt-4">
+                  <p className="text-[12px] text-white/25 mb-4">
+                    Required for your invoice.
+                  </p>
+                  <div className="space-y-3">
+                    <div>
+                      <label className="block text-[12px] text-white/40 mb-1">Full name <span className="text-red-400">*</span></label>
+                      <input
+                        type="text"
+                        value={billing.fullName}
+                        onChange={(e) => { setBilling({ ...billing, fullName: e.target.value }); setBillingErrors((p) => ({ ...p, fullName: '' })) }}
+                        placeholder={user?.full_name || 'John Doe'}
+                        className={`w-full px-3 py-2 rounded-lg bg-white/[0.04] border text-[13px] text-white placeholder:text-white/20 focus:outline-none transition-colors ${billingErrors.fullName ? 'border-red-500/50 focus:border-red-500/70' : 'border-white/[0.08] focus:border-white/[0.15]'}`}
+                      />
+                      {billingErrors.fullName && <p className="text-[11px] text-red-400 mt-1">{billingErrors.fullName}</p>}
+                    </div>
+                    <div>
+                      <label className="block text-[12px] text-white/40 mb-1">Street address <span className="text-red-400">*</span></label>
+                      <input
+                        type="text"
+                        value={billing.address}
+                        onChange={(e) => { setBilling({ ...billing, address: e.target.value }); setBillingErrors((p) => ({ ...p, address: '' })) }}
+                        placeholder="123 Main St, Apt 4"
+                        className={`w-full px-3 py-2 rounded-lg bg-white/[0.04] border text-[13px] text-white placeholder:text-white/20 focus:outline-none transition-colors ${billingErrors.address ? 'border-red-500/50 focus:border-red-500/70' : 'border-white/[0.08] focus:border-white/[0.15]'}`}
+                      />
+                      {billingErrors.address && <p className="text-[11px] text-red-400 mt-1">{billingErrors.address}</p>}
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
                       <div>
-                        <label className="block text-[12px] text-white/40 mb-1">Full name</label>
+                        <label className="block text-[12px] text-white/40 mb-1">City <span className="text-red-400">*</span></label>
                         <input
                           type="text"
-                          value={billing.fullName}
-                          onChange={(e) => setBilling({ ...billing, fullName: e.target.value })}
-                          placeholder={user?.full_name || 'John Doe'}
-                          className="w-full px-3 py-2 rounded-lg bg-white/[0.04] border border-white/[0.08] text-[13px] text-white placeholder:text-white/20 focus:outline-none focus:border-white/[0.15] transition-colors"
+                          value={billing.city}
+                          onChange={(e) => { setBilling({ ...billing, city: e.target.value }); setBillingErrors((p) => ({ ...p, city: '' })) }}
+                          placeholder="Hyderabad"
+                          className={`w-full px-3 py-2 rounded-lg bg-white/[0.04] border text-[13px] text-white placeholder:text-white/20 focus:outline-none transition-colors ${billingErrors.city ? 'border-red-500/50 focus:border-red-500/70' : 'border-white/[0.08] focus:border-white/[0.15]'}`}
                         />
+                        {billingErrors.city && <p className="text-[11px] text-red-400 mt-1">{billingErrors.city}</p>}
                       </div>
                       <div>
-                        <label className="block text-[12px] text-white/40 mb-1">Street address</label>
+                        <label className="block text-[12px] text-white/40 mb-1">State <span className="text-red-400">*</span></label>
                         <input
                           type="text"
-                          value={billing.address}
-                          onChange={(e) => setBilling({ ...billing, address: e.target.value })}
-                          placeholder="123 Main St, Apt 4"
-                          className="w-full px-3 py-2 rounded-lg bg-white/[0.04] border border-white/[0.08] text-[13px] text-white placeholder:text-white/20 focus:outline-none focus:border-white/[0.15] transition-colors"
+                          value={billing.state}
+                          onChange={(e) => { setBilling({ ...billing, state: e.target.value }); setBillingErrors((p) => ({ ...p, state: '' })) }}
+                          placeholder="Telangana"
+                          className={`w-full px-3 py-2 rounded-lg bg-white/[0.04] border text-[13px] text-white placeholder:text-white/20 focus:outline-none transition-colors ${billingErrors.state ? 'border-red-500/50 focus:border-red-500/70' : 'border-white/[0.08] focus:border-white/[0.15]'}`}
                         />
-                      </div>
-                      <div className="grid grid-cols-2 gap-3">
-                        <div>
-                          <label className="block text-[12px] text-white/40 mb-1">City</label>
-                          <input
-                            type="text"
-                            value={billing.city}
-                            onChange={(e) => setBilling({ ...billing, city: e.target.value })}
-                            placeholder="Hyderabad"
-                            className="w-full px-3 py-2 rounded-lg bg-white/[0.04] border border-white/[0.08] text-[13px] text-white placeholder:text-white/20 focus:outline-none focus:border-white/[0.15] transition-colors"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-[12px] text-white/40 mb-1">State</label>
-                          <input
-                            type="text"
-                            value={billing.state}
-                            onChange={(e) => setBilling({ ...billing, state: e.target.value })}
-                            placeholder="Telangana"
-                            className="w-full px-3 py-2 rounded-lg bg-white/[0.04] border border-white/[0.08] text-[13px] text-white placeholder:text-white/20 focus:outline-none focus:border-white/[0.15] transition-colors"
-                          />
-                        </div>
-                      </div>
-                      <div className="grid grid-cols-2 gap-3">
-                        <div>
-                          <label className="block text-[12px] text-white/40 mb-1">ZIP / Postal code</label>
-                          <input
-                            type="text"
-                            value={billing.zip}
-                            onChange={(e) => setBilling({ ...billing, zip: e.target.value })}
-                            placeholder="500001"
-                            className="w-full px-3 py-2 rounded-lg bg-white/[0.04] border border-white/[0.08] text-[13px] text-white placeholder:text-white/20 focus:outline-none focus:border-white/[0.15] transition-colors"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-[12px] text-white/40 mb-1">Country</label>
-                          <select
-                            value={billing.country}
-                            onChange={(e) => setBilling({ ...billing, country: e.target.value })}
-                            className="w-full px-3 py-2 rounded-lg bg-white/[0.04] border border-white/[0.08] text-[13px] text-white focus:outline-none focus:border-white/[0.15] transition-colors"
-                          >
-                            <option value="India">India</option>
-                            <option value="United States">United States</option>
-                            <option value="United Kingdom">United Kingdom</option>
-                            <option value="Canada">Canada</option>
-                            <option value="Australia">Australia</option>
-                            <option value="Germany">Germany</option>
-                            <option value="Singapore">Singapore</option>
-                          </select>
-                        </div>
+                        {billingErrors.state && <p className="text-[11px] text-red-400 mt-1">{billingErrors.state}</p>}
                       </div>
                     </div>
-                  )}
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-[12px] text-white/40 mb-1">ZIP / Postal code <span className="text-red-400">*</span></label>
+                        <input
+                          type="text"
+                          value={billing.zip}
+                          onChange={(e) => { setBilling({ ...billing, zip: e.target.value }); setBillingErrors((p) => ({ ...p, zip: '' })) }}
+                          placeholder="500001"
+                          className={`w-full px-3 py-2 rounded-lg bg-white/[0.04] border text-[13px] text-white placeholder:text-white/20 focus:outline-none transition-colors ${billingErrors.zip ? 'border-red-500/50 focus:border-red-500/70' : 'border-white/[0.08] focus:border-white/[0.15]'}`}
+                        />
+                        {billingErrors.zip && <p className="text-[11px] text-red-400 mt-1">{billingErrors.zip}</p>}
+                      </div>
+                      <div>
+                        <label className="block text-[12px] text-white/40 mb-1">Country <span className="text-red-400">*</span></label>
+                        <select
+                          value={billing.country}
+                          onChange={(e) => setBilling({ ...billing, country: e.target.value })}
+                          className="w-full px-3 py-2 rounded-lg bg-white/[0.04] border border-white/[0.08] text-[13px] text-white focus:outline-none focus:border-white/[0.15] transition-colors"
+                        >
+                          <option value="India">India</option>
+                          <option value="United States">United States</option>
+                          <option value="United Kingdom">United Kingdom</option>
+                          <option value="Canada">Canada</option>
+                          <option value="Australia">Australia</option>
+                          <option value="Germany">Germany</option>
+                          <option value="Singapore">Singapore</option>
+                        </select>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
 

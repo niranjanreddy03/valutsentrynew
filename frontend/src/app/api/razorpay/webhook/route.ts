@@ -4,12 +4,13 @@ import {
   verifyWebhookSignature,
 } from '@/lib/razorpay/server'
 import {
-  cycleDurationMs,
   isCycle,
   isPaidTier,
   type BillingCycle,
   type PaidTier,
 } from '@/lib/razorpay/plans'
+
+const PLAN_DURATION_MS = 30 * 24 * 60 * 60 * 1000
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -59,7 +60,7 @@ export async function POST(req: Request) {
   }
 
   const now = new Date()
-  const expiresAt = new Date(now.getTime() + cycleDurationMs(cycle))
+  const expiresAt = new Date(now.getTime() + PLAN_DURATION_MS)
 
   const { error } = await supabaseAdmin()
     .from('users')
