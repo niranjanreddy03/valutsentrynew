@@ -35,7 +35,7 @@ interface GuardResult {
  */
 async function getUserTier(): Promise<{ tier: SubscriptionTier; userId: string } | null> {
   try {
-    const supabase = createServerSupabaseClient()
+    const supabase = await createServerSupabaseClient()
     const { data: { user }, error } = await supabase.auth.getUser()
     if (error || !user) return null
 
@@ -66,7 +66,7 @@ export async function guardAddRepository(): Promise<GuardResult> {
   const limits = TIER_LIMITS[userInfo.tier]
 
   try {
-    const supabase = createServerSupabaseClient()
+    const supabase = await createServerSupabaseClient()
     const { count } = await supabase
       .from('repositories')
       .select('*', { count: 'exact', head: true })
@@ -103,7 +103,7 @@ export async function guardRunScan(): Promise<GuardResult> {
   const limits = TIER_LIMITS[userInfo.tier]
 
   try {
-    const supabase = createServerSupabaseClient()
+    const supabase = await createServerSupabaseClient()
 
     // Check daily scan count
     const todayStart = new Date()
