@@ -46,6 +46,23 @@ export function getPlanPrice(tier: PaidTier, cycle: BillingCycle): PlanPrice {
   }
 }
 
+export function getRazorpayPlanId(tier: PaidTier, cycle: BillingCycle): string | null {
+  const envName = `RAZORPAY_PLAN_${tier.toUpperCase()}_${cycle.toUpperCase()}`
+  return process.env[envName] || null
+}
+
+export function getSubscriptionTotalCount(cycle: BillingCycle): number {
+  const envName = cycle === 'yearly'
+    ? 'RAZORPAY_YEARLY_TOTAL_COUNT'
+    : 'RAZORPAY_MONTHLY_TOTAL_COUNT'
+  const configured = Number(process.env[envName])
+  if (Number.isInteger(configured) && configured > 0) return configured
+
+  // Razorpay requires a finite total_count. These defaults keep subscriptions
+  // running for a long production-safe window while still satisfying the API.
+  return cycle === 'yearly' ? 100 : 1200
+}
+
 export function cycleDurationMs(cycle: BillingCycle): number {
   const days = cycle === 'yearly' ? 365 : 30
   return days * 24 * 60 * 60 * 1000

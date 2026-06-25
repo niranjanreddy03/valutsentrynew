@@ -211,10 +211,12 @@ services:
       dockerfile: Dockerfile
       args:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000/api/v1}
+        BACKEND_API_URL: ${BACKEND_API_URL:-http://backend:8000/api/v1}
     container_name: secret-sentry-frontend
     restart: unless-stopped
     environment:
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000/api/v1}
+      BACKEND_API_URL: ${BACKEND_API_URL:-http://backend:8000/api/v1}
       NODE_ENV: ${NODE_ENV:-development}
     ports:
       - "3000:3000"

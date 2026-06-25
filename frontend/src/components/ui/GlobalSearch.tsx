@@ -29,7 +29,7 @@ interface SearchResult {
 }
 
 const PAGES: SearchResult[] = [
-  { id: 'dashboard', type: 'page', title: 'Dashboard', description: 'Overview and statistics', icon: <BarChart3 className="w-4 h-4" />, path: '/' },
+  { id: 'dashboard', type: 'page', title: 'Dashboard', description: 'Overview and statistics', icon: <BarChart3 className="w-4 h-4" />, path: '/dashboard' },
   { id: 'repositories', type: 'page', title: 'Repositories', description: 'Manage repositories', icon: <FolderGit2 className="w-4 h-4" />, path: '/repositories' },
   { id: 'secrets', type: 'page', title: 'Secrets', description: 'View detected secrets', icon: <Key className="w-4 h-4" />, path: '/secrets' },
   { id: 'scans', type: 'page', title: 'Scans', description: 'Scan history', icon: <Scan className="w-4 h-4" />, path: '/scans' },

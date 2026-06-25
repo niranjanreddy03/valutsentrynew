@@ -183,7 +183,7 @@ export class ApiError extends Error {
 // Create API Client
 const createApiClient = (): AxiosInstance => {
   const client = axios.create({
-    baseURL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1',
+    baseURL: process.env.NEXT_PUBLIC_API_URL || '/api/v1',
     headers: {
       'Content-Type': 'application/json',
     },
@@ -213,7 +213,7 @@ const createApiClient = (): AxiosInstance => {
         if (refreshToken) {
           try {
             const response = await axios.post(
-              `${process.env.NEXT_PUBLIC_API_URL}/auth/refresh`,
+              `${process.env.NEXT_PUBLIC_API_URL || '/api/v1'}/auth/refresh`,
               { refresh_token: refreshToken }
             )
             const { access_token, refresh_token } = response.data

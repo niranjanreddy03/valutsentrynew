@@ -15,6 +15,7 @@ import {
     UserCog,
     ChevronRight,
 } from 'lucide-react'
+import Link from 'next/link'
 import { useEffect, useRef, useState } from 'react'
 
 interface HeaderProps {
@@ -170,9 +171,9 @@ export default function Header({ alertCount, onMenuClick }: HeaderProps) {
                 ))}
               </div>
               <div className="p-2 border-t" style={{ borderColor: 'var(--border-color)' }}>
-                <a href="/alerts" className="block text-center text-sm text-blue-400 hover:underline">
+                <Link href="/alerts" className="block text-center text-sm text-blue-400 hover:underline">
                   View all
-                </a>
+                </Link>
               </div>
             </div>
           )}
@@ -216,7 +217,7 @@ export default function Header({ alertCount, onMenuClick }: HeaderProps) {
               }}
             >
               {/* Header: clickable profile link */}
-              <a
+              <Link
                 href="/settings"
                 ref={userMenuFirstItemRef}
                 role="menuitem"
@@ -250,14 +251,14 @@ export default function Header({ alertCount, onMenuClick }: HeaderProps) {
                   className="w-4 h-4 opacity-0 group-hover:opacity-100 transition-opacity"
                   style={{ color: 'var(--text-muted)' }}
                 />
-              </a>
+              </Link>
 
               {/* Divider */}
               <div className="h-px" style={{ background: 'rgba(82, 82, 82, 0.35)' }} />
 
               {/* Navigation actions */}
               <div className="p-1.5">
-                <a
+                <Link
                   href="/settings"
                   role="menuitem"
                   onClick={() => setShowUserMenu(false)}
@@ -269,7 +270,7 @@ export default function Header({ alertCount, onMenuClick }: HeaderProps) {
                     style={{ color: 'var(--text-muted)' }}
                   />
                   <span className="flex-1">Manage account</span>
-                </a>
+                </Link>
 
                 {/* Theme toggle — acts as a menu item */}
                 <button

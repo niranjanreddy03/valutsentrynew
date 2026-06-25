@@ -20,6 +20,25 @@ function razorpayAuth(): string {
   return 'Basic ' + Buffer.from(`${key_id}:${key_secret}`).toString('base64')
 }
 
+async function razorpayJson<T>(path: string, init: RequestInit): Promise<T> {
+  const res = await fetch(`${RAZORPAY_API}${path}`, {
+    ...init,
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: razorpayAuth(),
+      ...(init.headers || {}),
+    },
+  })
+
+  if (!res.ok) {
+    const err = await res.text()
+    console.error('[razorpay] API request failed:', path, res.status, err)
+    throw new Error(`Razorpay API error: ${res.status}`)
+  }
+
+  return res.json()
+}
+
 /**
  * Create a Razorpay order via REST API.
  * Replaces razorpay SDK's orders.create().
@@ -30,22 +49,46 @@ export async function createRazorpayOrder(params: {
   receipt: string
   notes: Record<string, string>
 }): Promise<{ id: string; amount: number; currency: string }> {
-  const res = await fetch(`${RAZORPAY_API}/orders`, {
+  return razorpayJson('/orders', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: razorpayAuth(),
-    },
     body: JSON.stringify(params),
   })
+}
 
-  if (!res.ok) {
-    const err = await res.text()
-    console.error('[razorpay] order creation failed:', res.status, err)
-    throw new Error(`Razorpay API error: ${res.status}`)
-  }
+export async function createRazorpaySubscription(params: {
+  plan_id: string
+  total_count: number
+  quantity?: number
+  customer_notify?: boolean
+  notes: Record<string, string>
+}): Promise<{
+  id: string
+  status: string
+  plan_id: string
+  short_url?: string
+  current_start?: number | null
+  current_end?: number | null
+}> {
+  return razorpayJson('/subscriptions', {
+    method: 'POST',
+    body: JSON.stringify({
+      quantity: 1,
+      customer_notify: true,
+      ...params,
+    }),
+  })
+}
 
-  return res.json()
+export async function fetchRazorpaySubscription(subscriptionId: string): Promise<{
+  id: string
+  status: string
+  notes?: Record<string, string>
+  current_start?: number | null
+  current_end?: number | null
+  charge_at?: number | null
+  end_at?: number | null
+}> {
+  return razorpayJson(`/subscriptions/${subscriptionId}`, { method: 'GET' })
 }
 
 /** Returns true if Razorpay keys are configured. */
@@ -63,6 +106,23 @@ export function verifyPaymentSignature(params: {
   const expected = crypto
     .createHmac('sha256', secret)
     .update(`${params.orderId}|${params.paymentId}`)
+    .digest('hex')
+  const a = Buffer.from(expected, 'utf8')
+  const b = Buffer.from(params.signature, 'utf8')
+  if (a.length !== b.length) return false
+  return crypto.timingSafeEqual(a, b)
+}
+
+export function verifySubscriptionSignature(params: {
+  subscriptionId: string
+  paymentId: string
+  signature: string
+}): boolean {
+  const secret = process.env.RAZORPAY_KEY_SECRET
+  if (!secret) return false
+  const expected = crypto
+    .createHmac('sha256', secret)
+    .update(`${params.paymentId}|${params.subscriptionId}`)
     .digest('hex')
   const a = Buffer.from(expected, 'utf8')
   const b = Buffer.from(params.signature, 'utf8')

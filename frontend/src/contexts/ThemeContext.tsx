@@ -51,7 +51,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   return (
     <ThemeContext.Provider value={{ theme, toggleTheme, setTheme }}>
-      {mounted ? children : <div style={{ visibility: 'hidden' }}>{children}</div>}
+      {children}
     </ThemeContext.Provider>
   )
 }

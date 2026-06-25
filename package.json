@@ -5,8 +5,8 @@
   "private": true,
   "scripts": {
     "dev": "concurrently -n \"backend,frontend\" -c \"yellow,cyan\" \"npm run dev:backend\" \"npm run dev:frontend\"",
-    "dev:backend": "node scanner/server.js",
-    "dev:backend:python": "cd backend && python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000",
+    "dev:backend": "cd backend && python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000",
+    "dev:backend:scanner": "node scanner/server.js",
     "dev:frontend": "cd frontend && npm run dev",
     "build": "cd frontend && npm run build",
     "start": "concurrently -n \"backend,frontend\" -c \"yellow,cyan\" \"npm run start:backend\" \"npm run start:frontend\"",
@@ -29,5 +29,9 @@
   },
   "engines": {
     "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "@sentry/node": "^10.53.1",
+    "@sentry/profiling-node": "^10.53.1"
   }
 }

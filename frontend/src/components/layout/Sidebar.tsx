@@ -42,7 +42,7 @@ type NavItem = {
 }
 
 const navigation: NavItem[] = [
-  { name: 'Dashboard', href: '/', icon: LayoutDashboard },
+  { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
   { name: 'Repositories', href: '/repositories', icon: FolderGit2 },
   { name: 'S3 Buckets', href: '/s3-buckets', icon: Cloud, feature: 'aws_integration' },
   { name: 'Scans', href: '/scans', icon: Radar },
@@ -114,7 +114,7 @@ export default function Sidebar({ isOpen, onToggle }: SidebarProps) {
     >
       {/* Logo */}
       <div className="h-14 flex items-center justify-between px-4 border-b" style={{ borderColor: 'var(--border-color)' }}>
-        <Link href="/" className="flex items-center gap-3">
+        <Link href="/dashboard" className="flex items-center gap-3">
           <div className="w-8 h-8 rounded-md flex items-center justify-center" style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border-color)' }}>
             <Shield className="w-4 h-4" style={{ color: 'var(--text-primary)' }} />
           </div>

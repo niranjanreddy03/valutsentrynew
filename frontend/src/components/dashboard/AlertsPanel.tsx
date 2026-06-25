@@ -11,6 +11,7 @@ import {
   ExternalLink,
   BellOff
 } from 'lucide-react'
+import Link from 'next/link'
 
 interface Alert {
   id: number
@@ -181,10 +182,10 @@ export default function AlertsPanel({ alerts }: AlertsPanelProps) {
       {/* Footer */}
       {localAlerts.length > 4 && (
         <div className="pt-3 mt-3 border-t border-[var(--border-color)]">
-          <a href="/alerts" className="text-sm text-[var(--accent)] hover:underline flex items-center justify-center gap-1">
+          <Link href="/alerts" className="text-sm text-[var(--accent)] hover:underline flex items-center justify-center gap-1">
             View All {localAlerts.length} Alerts
             <ExternalLink className="w-3 h-3" />
-          </a>
+          </Link>
         </div>
       )}
     </div>

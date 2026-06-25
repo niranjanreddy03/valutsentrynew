@@ -8,6 +8,7 @@ import {
   Minus,
   ExternalLink
 } from 'lucide-react'
+import Link from 'next/link'
 
 interface Repository {
   id: number
@@ -137,9 +138,9 @@ export default function RepositoryRiskRanking({ repositories, loading }: Reposit
         })}
       </div>
 
-      <a href="/repositories" className="block w-full mt-3 py-2 text-xs text-center text-[var(--accent)] hover:underline flex-shrink-0">
+      <Link href="/repositories" className="block w-full mt-3 py-2 text-xs text-center text-[var(--accent)] hover:underline flex-shrink-0">
         View All Repositories →
-      </a>
+      </Link>
     </div>
   )
 }

@@ -12,6 +12,12 @@ applications:
             - echo "RAZORPAY_KEY_SECRET=$RAZORPAY_KEY_SECRET" >> .env.production
             - echo "RAZORPAY_WEBHOOK_SECRET=$RAZORPAY_WEBHOOK_SECRET" >> .env.production
             - echo "RAZORPAY_CURRENCY=$RAZORPAY_CURRENCY" >> .env.production
+            - echo "RAZORPAY_PLAN_PREMIUM_MONTHLY=$RAZORPAY_PLAN_PREMIUM_MONTHLY" >> .env.production
+            - echo "RAZORPAY_PLAN_PREMIUM_YEARLY=$RAZORPAY_PLAN_PREMIUM_YEARLY" >> .env.production
+            - echo "RAZORPAY_PLAN_PREMIUM_PLUS_MONTHLY=$RAZORPAY_PLAN_PREMIUM_PLUS_MONTHLY" >> .env.production
+            - echo "RAZORPAY_PLAN_PREMIUM_PLUS_YEARLY=$RAZORPAY_PLAN_PREMIUM_PLUS_YEARLY" >> .env.production
+            - echo "RAZORPAY_MONTHLY_TOTAL_COUNT=$RAZORPAY_MONTHLY_TOTAL_COUNT" >> .env.production
+            - echo "RAZORPAY_YEARLY_TOTAL_COUNT=$RAZORPAY_YEARLY_TOTAL_COUNT" >> .env.production
             - echo "SUPABASE_SERVICE_ROLE_KEY=$SUPABASE_SERVICE_ROLE_KEY" >> .env.production
             - echo "TURNSTILE_SECRET_KEY=$TURNSTILE_SECRET_KEY" >> .env.production
             - echo "RESEND_API_KEY=$RESEND_API_KEY" >> .env.production

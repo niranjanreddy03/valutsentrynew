@@ -130,13 +130,16 @@ export function serverRateLimit(
  * Works behind CloudFront / Amplify / Cloudflare proxies.
  */
 export function getClientIp(headers: Headers): string {
+  const cf = headers.get('cf-connecting-ip')
+  if (cf) return cf.trim()
+
+  const realIp = headers.get('x-real-ip')
+  if (realIp) return realIp.trim()
+
   const xff = headers.get('x-forwarded-for')
   if (xff) return xff.split(',')[0].trim()
-  return (
-    headers.get('cf-connecting-ip') ||
-    headers.get('x-real-ip') ||
-    '127.0.0.1'
-  )
+
+  return '127.0.0.1'
 }
 
 /**
