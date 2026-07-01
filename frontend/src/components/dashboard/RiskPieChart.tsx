@@ -96,7 +96,7 @@ export default function RiskPieChart({ data, loading }: RiskPieChartProps) {
         </span>
       </div>
 
-      {/* Chart — centered donut */}
+      {/* Centered donut chart */}
       <div className="flex-1 flex items-center justify-center">
         <div className="relative w-[200px] h-[200px]">
           <ResponsiveContainer width="100%" height="100%">
@@ -135,7 +135,7 @@ export default function RiskPieChart({ data, loading }: RiskPieChartProps) {
         </div>
       </div>
 
-      {/* Legend — horizontal grid */}
+      {/* Horizontal legend grid */}
       <div className="grid grid-cols-2 gap-2 mt-4">
         {data.map((item) => {
           const percentage = total > 0 ? ((item.value / total) * 100).toFixed(1) : '0'

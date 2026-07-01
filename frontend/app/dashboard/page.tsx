@@ -144,7 +144,7 @@ function buildTrendSeries(
     b.secrets += s.secrets_found || 0
     if (s.status === 'completed' && (s.secrets_found || 0) === 0) b.resolved += 1
   }
-  // Distribute critical count onto the most recent day — best-effort since
+  // Distribute critical count onto the most recent day, best-effort since
   // the stats endpoint gives us totals, not per-day criticals.
   const lastKey = Object.keys(buckets).slice(-1)[0]
   if (lastKey) buckets[lastKey].critical = criticalCount
@@ -313,13 +313,13 @@ export default function Dashboard() {
         return
       }
 
-      // Capture the scanner's real scan_id — we NEED this for polling, because
+      // Capture the scanner's real scan_id. We need this for polling, because
       // the scanner assigns its own internal repository_id that doesn't match
       // the Supabase repo id, so list-based matching would never hit.
       const triggerData = await response.json().catch(() => ({}))
       const scanId = triggerData?.scan_id
 
-      toast.info('Scan started', `Scanning ${selectedRepo}…`)
+      toast.info('Scan started', `Scanning ${selectedRepo}...`)
       setShowNewScanModal(false)
       setSelectedRepo('')
       setScanBranch('main')
@@ -332,8 +332,8 @@ export default function Dashboard() {
       if (result.status === 'completed') {
         if (result.secretsFound > 0) {
           toast.warning(
-            `Scan complete · ${result.secretsFound} secret${result.secretsFound === 1 ? '' : 's'} found`,
-            `${repoName} — review findings on the Secrets page`,
+            `Scan complete - ${result.secretsFound} secret${result.secretsFound === 1 ? '' : 's'} found`,
+            `${repoName} - review findings on the Secrets page`,
           )
 
           // Run any user-configured policies against the new findings.
@@ -342,7 +342,7 @@ export default function Dashboard() {
             if (outcome.firedPolicies > 0) {
               for (const alert of outcome.alerts) {
                 toast.warning(
-                  `Policy triggered · ${alert.policyName}`,
+                  `Policy triggered - ${alert.policyName}`,
                   `${alert.findings.length} finding${alert.findings.length === 1 ? '' : 's'} in ${repoName}`,
                 )
               }
@@ -363,14 +363,14 @@ export default function Dashboard() {
             console.warn('[POLICY] Dashboard evaluation failed:', policyErr)
           }
         } else {
-          toast.success('Scan complete ✓', `${repoName} — no secrets found`)
+          toast.success('Scan complete', `${repoName} - no secrets found`)
         }
       } else if (result.status === 'failed') {
         toast.error('Scan failed', `${repoName} could not be scanned`)
       } else if (result.status === 'cancelled') {
         toast.info('Scan cancelled', repoName)
       } else {
-        toast.info('Scan still running', `${repoName} — check the Scans page for progress`)
+        toast.info('Scan still running', `${repoName} - check the Scans page for progress`)
       }
     } catch (err) {
       console.error('[SCAN] trigger failed', err)
@@ -607,7 +607,7 @@ export default function Dashboard() {
 
         // Fallback: demo data or Supabase
         if (isDemoMode()) {
-          setData(DEMO_DASHBOARD_DATA)
+          setData({ ...emptyDashboardData, ...DEMO_DASHBOARD_DATA })
           setRepositories(DEMO_REPOSITORIES.map(repo => ({
             value: repo.name,
             label: repo.name,
@@ -624,7 +624,7 @@ export default function Dashboard() {
           alertService.getAll(),
         ])
 
-        // Process repositories for dropdown — keep id + url so scan can call backend
+        // Process repositories for dropdown, keeping id + url for backend scans.
         const repoOptions = reposData.map((repo: any) => ({
           value: repo.name,
           label: repo.name,
@@ -751,7 +751,7 @@ export default function Dashboard() {
 
     fetchDashboardData()
 
-    // Live refresh — re-pull every 30s while the tab is visible so
+    // Live refresh: re-pull every 30s while the tab is visible so
     // trend/heatmap/severity charts reflect recent scans without a manual
     // page reload. Skipping updates while hidden avoids pointless fetches
     // on background tabs.
@@ -785,7 +785,7 @@ export default function Dashboard() {
     data.kpiStats.secrets_detected === 0 &&
     (data.secret_lifecycle?.detected ?? 0) === 0
 
-  // Security posture — quick heuristic so the hero card can give the user a
+  // Security posture: quick heuristic so the hero card can give the user a
   // one-glance signal. 100 is clean; each critical costs 15, each high 5.
   // For new accounts with no scans, show 0 instead of a misleading perfect score.
   const hasScannedBefore =
@@ -845,7 +845,7 @@ export default function Dashboard() {
         <main className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden" style={{ background: 'var(--bg-primary)' }}>
           <div className="max-w-[1400px] mx-auto px-6 pt-5 pb-8 space-y-6">
             {/* ============================================================ */}
-            {/*  Hero — greeting + security posture score + primary actions  */}
+            {/*  Hero: greeting + security posture score + primary actions    */}
             {/* ============================================================ */}
             <section
               className="relative overflow-hidden rounded-3xl border border-[var(--border-color)] bg-gradient-to-br from-[var(--bg-secondary)] via-[var(--bg-secondary)] to-[var(--bg-tertiary)]"
@@ -881,9 +881,9 @@ export default function Dashboard() {
                           (tier === 'basic'
                             ? 'Free'
                             : tier === 'premium'
-                            ? '₹299/month'
+                            ? 'INR 299/mo'
                             : tier === 'premium_plus'
-                            ? '₹999/month'
+                            ? 'INR 999/mo'
                             : '')
                         const styles =
                           tier === 'premium_plus'
@@ -902,7 +902,7 @@ export default function Dashboard() {
                             <span>{display} Plan</span>
                             {priceLabel && (
                               <>
-                                <span className="opacity-50">·</span>
+                                <span className="opacity-50">-</span>
                                 <span className="normal-case tracking-normal">{priceLabel}</span>
                               </>
                             )}
@@ -935,7 +935,7 @@ export default function Dashboard() {
                           {data.running_scans.length} scan
                           {data.running_scans.length === 1 ? '' : 's'} running
                         </span>
-                        <span className="text-blue-300/70">·</span>
+                        <span className="text-blue-300/70">-</span>
                         <span className="truncate max-w-[260px] text-blue-200/80">
                           {data.running_scans
                             .slice(0, 3)
@@ -1075,7 +1075,7 @@ export default function Dashboard() {
             )}
 
             {/* ============================================================ */}
-            {/*  Stale-scan watchlist — repos not scanned in >7 days          */}
+            {/*  Stale-scan watchlist: repos not scanned in >7 days            */}
             {/* ============================================================ */}
             {!isNewAccount && (data?.stale_repositories?.length ?? 0) > 0 && (
               <section className="relative overflow-hidden rounded-2xl border border-amber-500/30 bg-amber-500/5 p-5">
@@ -1107,7 +1107,7 @@ export default function Dashboard() {
                           className="inline-flex items-center gap-1.5 rounded-md border border-amber-500/20 bg-[var(--bg-secondary)] px-2.5 py-1 text-xs"
                         >
                           <span className="font-medium text-[var(--text-primary)]">{r.name}</span>
-                          <span className="text-[var(--text-muted)]">·</span>
+                          <span className="text-[var(--text-muted)]">-</span>
                           <span className="text-amber-300">
                             {r.last_scan_at ? `${r.days_since}d ago` : 'never'}
                           </span>
@@ -1120,7 +1120,7 @@ export default function Dashboard() {
             )}
 
             {/* ============================================================ */}
-            {/*  Executive KPIs (always shown — provides key metrics)         */}
+            {/*  Executive KPIs (always shown, provides key metrics)           */}
             {/* ============================================================ */}
             <section>
               <SectionHeading
@@ -1137,7 +1137,7 @@ export default function Dashboard() {
             {!loading && (
               <>
                 {/* ======================================================== */}
-                {/*  Risk overview — severity + trend + top risky repos      */}
+                {/*  Risk overview: severity + trend + top risky repos        */}
                 {/* ======================================================== */}
                 <section>
                   <SectionHeading
@@ -1195,7 +1195,7 @@ export default function Dashboard() {
                 </section>
 
                 {/* ======================================================== */}
-                {/*  Activity & findings — what needs action + what just ran */}
+                {/*  Activity & findings: action items and recent scans       */}
                 {/* ======================================================== */}
                 <section>
                   <SectionHeading
